@@ -61,6 +61,13 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
 # Flask stuff:
 instance/
 .webassets-cache
@@ -205,3 +212,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# macOS
+.DS_Store
