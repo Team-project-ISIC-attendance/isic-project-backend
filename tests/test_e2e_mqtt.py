@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiomqtt import Client
@@ -72,10 +72,8 @@ async def test_mqtt_json_message_stored_in_database(
     db_session: AsyncSession,
 ) -> None:
     isic_identifier = "JSON123456"
-    timestamp = datetime.now(UTC).isoformat()
     message = {
         "isic_identifier": isic_identifier,
-        "timestamp": timestamp,
     }
     await publish_message(
         mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
@@ -93,6 +91,93 @@ async def test_mqtt_json_message_stored_in_database(
     assert test_scan.isic.first_name is None
     assert test_scan.isic.last_name is None
     assert test_scan.timestamp is not None
+
+
+@pytest.mark.asyncio
+async def test_timestamp_generated_on_backend(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    db_session: AsyncSession,
+) -> None:
+    isic_identifier = "TIMESTAMP_TEST"
+    before_message = datetime.now(UTC)
+    
+    message = {
+        "isic_identifier": isic_identifier,
+    }
+    await publish_message(
+        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+    )
+
+    await wait_for_message_processing()
+    
+    after_message = datetime.now(UTC)
+
+    scans = await get_scans(db_session, limit=10, offset=0)
+    test_scan = find_scan_by_identifier(scans, isic_identifier)
+
+    assert test_scan is not None, "Scan not found in database"
+    assert test_scan.timestamp is not None
+    
+    scan_timestamp = test_scan.timestamp if test_scan.timestamp.tzinfo else test_scan.timestamp.replace(tzinfo=UTC)
+    assert before_message - timedelta(seconds=1) <= scan_timestamp <= after_message + timedelta(seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_timestamp_ignored_if_provided_in_message(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    db_session: AsyncSession,
+) -> None:
+    isic_identifier = "TIMESTAMP_IGNORED"
+    old_timestamp = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    
+    message = {
+        "isic_identifier": isic_identifier,
+        "timestamp": old_timestamp,
+    }
+    before_message = datetime.now(UTC)
+    await publish_message(
+        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+    )
+
+    await wait_for_message_processing()
+    after_message = datetime.now(UTC)
+
+    scans = await get_scans(db_session, limit=10, offset=0)
+    test_scan = find_scan_by_identifier(scans, isic_identifier)
+
+    assert test_scan is not None, "Scan not found in database"
+    assert test_scan.timestamp is not None
+    
+    scan_timestamp = test_scan.timestamp if test_scan.timestamp.tzinfo else test_scan.timestamp.replace(tzinfo=UTC)
+    assert before_message - timedelta(seconds=1) <= scan_timestamp <= after_message + timedelta(seconds=1)
+    
+    old_timestamp_dt = datetime.fromisoformat(old_timestamp.replace("Z", "+00:00")).replace(tzinfo=UTC)
+    assert scan_timestamp > old_timestamp_dt
+
+
+@pytest.mark.asyncio
+async def test_plain_text_message_rejected(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    db_session: AsyncSession,
+) -> None:
+    isic_identifier = "PLAINTEXT123"
+    
+    await publish_message(
+        mqtt_host, mqtt_port, "isic/scan", isic_identifier.encode("utf-8")
+    )
+
+    await wait_for_message_processing()
+
+    scans = await get_scans(db_session, limit=100, offset=0)
+    test_scan = find_scan_by_identifier(scans, isic_identifier)
+
+    assert test_scan is None, "Plain text message should be rejected"
 
 
 @pytest.mark.asyncio

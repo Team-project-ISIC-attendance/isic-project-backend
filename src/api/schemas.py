@@ -1,6 +1,4 @@
-from typing import ClassVar
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -13,16 +11,8 @@ class ScanQueryParams(BaseModel):
 
 
 class ScanResponse(BaseModel):
-    id: int = Field(..., description="Scan ID")
-    isic_id: int = Field(..., description="ISIC ID")
-    isic_identifier: str = Field(..., description="ISIC identifier")
-    first_name: str | None = Field(None, description="First name")
-    last_name: str | None = Field(None, description="Last name")
-    timestamp: str = Field(..., description="Scan timestamp in ISO format")
-    created_at: str = Field(..., description="Scan creation timestamp in ISO format")
-
-    class Config:
-        json_schema_extra: ClassVar[dict[str, dict[str, int | str | None]]] = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": 1,
                 "isic_id": 1,
@@ -33,6 +23,15 @@ class ScanResponse(BaseModel):
                 "created_at": "2024-01-01T12:00:00+00:00",
             }
         }
+    )
+
+    id: int = Field(..., description="Scan ID")
+    isic_id: int = Field(..., description="ISIC ID")
+    isic_identifier: str = Field(..., description="ISIC identifier")
+    first_name: str | None = Field(None, description="First name")
+    last_name: str | None = Field(None, description="Last name")
+    timestamp: str = Field(..., description="Scan timestamp in ISO format")
+    created_at: str = Field(..., description="Scan creation timestamp in ISO format")
 
 
 class ISICUpdateRequest(BaseModel):
