@@ -23,6 +23,8 @@ dev = [
     "mypy>=1.17.0",
     "pytest>=8.3.3",
     "pytest-asyncio>=0.24.0",
+    "testcontainers>=4.9.0",
+    "httpx>=0.27.0",
 ]
 
 [tool.ruff]
@@ -104,3 +106,12 @@ python_version = "3.13"
 ignore_missing_imports = false
 strict = true
 plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+
+[[tool.mypy.overrides]]
+module = "testcontainers.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:testcontainers",
+]

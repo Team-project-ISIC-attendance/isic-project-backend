@@ -1,6 +1,4 @@
-"""Database connection and session management."""
-
-import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import (
@@ -11,48 +9,48 @@ from sqlalchemy.ext.asyncio import (
 
 from src.config import settings
 
+SQLITE_URL_PREFIX = "sqlite+aiosqlite:///"
+ROOT_PATH = Path("/")
+
+
+def _extract_database_path_from_url(url: str) -> Path | None:
+    if not url.startswith(SQLITE_URL_PREFIX):
+        return None
+
+    path_string = url.replace(SQLITE_URL_PREFIX, "", 1)
+
+    if path_string.startswith("//"):
+        absolute_path = "/" + path_string[2:]
+        return Path(absolute_path)
+    elif path_string.startswith("./"):
+        relative_path = path_string[2:]
+        return Path(relative_path).resolve()
+    else:
+        return Path(path_string).resolve()
+
 
 def _ensure_database_directory() -> None:
-    """Ensure database directory exists."""
-    # Extract database path from URL
-    # Formats:
-    # - sqlite+aiosqlite:///./data/isic_scans.db (relative with ./)
-    # - sqlite+aiosqlite:////app/data/isic_scans.db (absolute with //)
-    # - sqlite+aiosqlite:///data/isic_scans.db (relative)
-    url = settings.database_url
-    if url.startswith("sqlite+aiosqlite:///"):
-        db_path = url.replace("sqlite+aiosqlite:///", "", 1)
-        
-        # Handle absolute paths (starting with //)
-        if db_path.startswith("//"):
-            db_path = "/" + db_path[2:]
-            db_file = Path(db_path)
-        # Handle relative paths with ./
-        elif db_path.startswith("./"):
-            db_path = db_path[2:]
-            db_file = Path(db_path).resolve()
-        # Handle relative paths without ./
-        else:
-            db_file = Path(db_path).resolve()
-        
-        db_dir = db_file.parent
-        
-        # Create directory if it doesn't exist and is not root
-        if db_dir and db_dir != Path("/") and not db_dir.exists():
-            db_dir.mkdir(parents=True, exist_ok=True)
+    db_file = _extract_database_path_from_url(settings.database_url)
+    if db_file is None:
+        return
+
+    db_directory = db_file.parent
+
+    is_not_root = db_directory != ROOT_PATH
+    directory_exists = db_directory.exists()
+
+    if db_directory and is_not_root and not directory_exists:
+        db_directory.mkdir(parents=True, exist_ok=True)
 
 
-# Ensure database directory exists before creating engine
 _ensure_database_directory()
 
-# Create async engine
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
 )
 
-# Create async session factory
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -62,8 +60,7 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncSession:
-    """Get database session."""
+async def get_db() -> AsyncGenerator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
