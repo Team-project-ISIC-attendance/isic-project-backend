@@ -3,13 +3,16 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from src.api.auth import router as auth_router
 from src.api.routes import router
 from src.config import settings
 from src.database.connection import AsyncSessionLocal, engine
 from src.mqtt.client import MQTTClient
 from src.mqtt.handler import handle_mqtt_message
+from src.services.auth_service import ensure_admin_exists
 
 
 def _create_mqtt_client() -> MQTTClient:
@@ -27,6 +30,9 @@ async def _startup_application() -> MQTTClient:
     mqtt_client = _create_mqtt_client()
     await mqtt_client.start(handle_mqtt_message)
     logger.info("MQTT client started")
+    async with AsyncSessionLocal() as session:
+        await ensure_admin_exists(session)
+    logger.info("Admin user ensured")
     return mqtt_client
 
 
@@ -50,6 +56,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
 app.include_router(router)
 
 

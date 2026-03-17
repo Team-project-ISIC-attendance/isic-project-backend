@@ -9,17 +9,17 @@ from alembic.config import Config
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.attendance import AttendanceRecord, AttendanceStatus, MarkedBy
 from src.models.enrollment import Enrollment
+from src.models.isic import ISIC
 from src.models.lesson import Lesson
+from src.models.scan import ISICScan
 from src.models.schedule_entry import LessonType, ScheduleEntry
 from src.models.semester import Semester
 from src.models.subject import Subject
 from src.models.user import User, UserRole
 from src.models.week_note import WeekNote
-
-from src.models.isic import ISIC
-from src.models.scan import ISICScan
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 DATABASE_FILE_SUFFIX = ".db"

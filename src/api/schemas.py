@@ -46,3 +46,24 @@ class ISICResponse(BaseModel):
     last_name: str | None = Field(None, description="Last name")
     created_at: str = Field(..., description="ISIC creation timestamp in ISO format")
 
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    role: str
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    role: str = "teacher"
+

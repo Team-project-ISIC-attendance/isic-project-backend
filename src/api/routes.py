@@ -11,7 +11,7 @@ from src.database.connection import get_db
 from src.models.scan import ISICScan
 from src.services.scan_service import get_scan_by_id, get_scans, update_isic
 
-router = APIRouter()
+router = APIRouter(tags=["scans"])
 
 
 @router.get("/health", response_model=HealthResponse)

@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     http_host: str
     http_port: int
 
+    jwt_secret_key: str
+    jwt_expiry_hours: int = 24
+    cors_origins: str = "*"
+    admin_email: str = "admin@stuba.sk"
+    admin_password: str = "admin"
+
 
 settings = Settings()
 
