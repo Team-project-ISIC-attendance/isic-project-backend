@@ -19,6 +19,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<4.1.0",
     "python-multipart>=0.0.9",
+    "openpyxl>=3.1.0",
 ]
 
 [dependency-groups]
@@ -121,6 +122,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "passlib.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "openpyxl.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

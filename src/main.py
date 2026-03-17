@@ -8,6 +8,7 @@ from loguru import logger
 
 from src.api.attendance import router as attendance_router
 from src.api.auth import router as auth_router
+from src.api.export import router as export_router
 from src.api.lessons import router as lessons_router
 from src.api.routes import router
 from src.api.schedule import router as schedule_router
@@ -73,6 +74,7 @@ app.add_middleware(
 
 app.include_router(attendance_router)
 app.include_router(auth_router)
+app.include_router(export_router)
 app.include_router(lessons_router)
 app.include_router(router)
 app.include_router(semesters_router)
