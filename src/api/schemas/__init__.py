@@ -1,3 +1,11 @@
+from src.api.schemas.attendance import (
+    AttendanceLessonInfo,
+    AttendanceResponse,
+    AttendanceStudentEntry,
+    AttendanceSummary,
+    AttendanceUpdateRequest,
+    AttendanceUpdateResponse,
+)
 from src.api.schemas.base import (
     HealthResponse,
     ISICResponse,
@@ -14,12 +22,24 @@ from src.api.schemas.enrollment import (
     ImportError_,
     ImportResult,
 )
+from src.api.schemas.lesson import (
+    LessonResponse,
+    LessonUpdateRequest,
+    WeekLessonAttendanceSummary,
+    WeekLessonResponse,
+)
 from src.api.schemas.schedule import ScheduleEntryCreate, ScheduleEntryResponse
 from src.api.schemas.semester import SemesterCreate, SemesterResponse
 from src.api.schemas.subject import SubjectCreate, SubjectResponse, SubjectUpdate
 from src.api.schemas.week import WeekNoteUpdate, WeekResponse
 
 __all__ = [
+    "AttendanceLessonInfo",
+    "AttendanceResponse",
+    "AttendanceStudentEntry",
+    "AttendanceSummary",
+    "AttendanceUpdateRequest",
+    "AttendanceUpdateResponse",
     "EnrollStudentRequest",
     "EnrollmentResponse",
     "HealthResponse",
@@ -27,6 +47,8 @@ __all__ = [
     "ISICUpdateRequest",
     "ImportError_",
     "ImportResult",
+    "LessonResponse",
+    "LessonUpdateRequest",
     "RegisterRequest",
     "ScanQueryParams",
     "ScanResponse",
@@ -39,6 +61,8 @@ __all__ = [
     "SubjectUpdate",
     "TokenResponse",
     "UserResponse",
+    "WeekLessonAttendanceSummary",
+    "WeekLessonResponse",
     "WeekNoteUpdate",
     "WeekResponse",
 ]
