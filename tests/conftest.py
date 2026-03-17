@@ -21,6 +21,7 @@ from testcontainers.core.container import DockerContainer
 # Set required config values for tests before importing settings
 os.environ.setdefault("HTTP_HOST", "localhost")
 os.environ.setdefault("HTTP_PORT", "8000")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing")
 
 from loguru import logger
 
