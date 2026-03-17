@@ -10,6 +10,7 @@ from src.api.auth import router as auth_router
 from src.api.routes import router
 from src.api.schedule import router as schedule_router
 from src.api.semesters import router as semesters_router
+from src.api.students import router as students_router
 from src.api.subjects import router as subjects_router
 from src.api.weeks import router as weeks_router
 from src.config import settings
@@ -71,6 +72,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(router)
 app.include_router(semesters_router)
+app.include_router(students_router)
 app.include_router(subjects_router)
 app.include_router(schedule_router)
 app.include_router(weeks_router)
