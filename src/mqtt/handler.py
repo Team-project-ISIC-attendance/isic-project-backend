@@ -5,6 +5,8 @@ from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.scan import ISICScan
+from src.services.attendance_service import try_auto_record
 from src.services.scan_service import create_scan_with_identifier
 
 
@@ -41,8 +43,8 @@ def _parse_message(message_str: str) -> str | None:
 async def _create_scan_record(
     session: AsyncSession,
     isic_identifier: str,
-) -> None:
-    await create_scan_with_identifier(
+) -> ISICScan:
+    return await create_scan_with_identifier(
         session=session,
         isic_identifier=isic_identifier,
         timestamp=None,
@@ -63,8 +65,17 @@ async def handle_mqtt_message(
             logger.warning("Invalid message format: must be valid JSON with 'isic_identifier' field")
             return
 
-        await _create_scan_record(session, isic_identifier)
+        scan = await _create_scan_record(session, isic_identifier)
         logger.info("Created scan record for ISIC identifier")
+
+        updated = await try_auto_record(
+            session=session,
+            isic_id=scan.isic_id,
+            scan_id=scan.id,
+            scan_timestamp=scan.timestamp,
+        )
+        if updated:
+            logger.info("Auto-recorded attendance for {} lessons", len(updated))
 
     except UnicodeDecodeError:
         logger.error("Failed to decode MQTT payload")
