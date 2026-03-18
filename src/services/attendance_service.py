@@ -1,12 +1,17 @@
+from datetime import datetime, timedelta
+
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.config import settings
 from src.models.attendance import (
     AttendanceRecord,
     AttendanceStatus,
     MarkedBy,
 )
+from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
 from src.models.subject import Subject
@@ -79,9 +84,9 @@ async def get_lesson_attendance(
 
     students = []
     for record in sorted_records:
-        scan_timestamp = None
+        scan_timestamp: str | None = None
         if record.scan is not None:
-            scan_timestamp = record.scan.timestamp
+            scan_timestamp = record.scan.timestamp.isoformat()
         students.append({
             "attendance_id": record.id,
             "isic_identifier": record.isic.isic_identifier,
@@ -124,3 +129,93 @@ async def update_attendance_status(
     await session.commit()
     await session.refresh(record)
     return record
+
+
+async def try_auto_record(
+    session: AsyncSession,
+    isic_id: int,
+    scan_id: int,
+    scan_timestamp: datetime,
+) -> list[AttendanceRecord]:
+    """Try to auto-record attendance for an ISIC scan.
+
+    Finds active lessons within the scan time window and updates
+    attendance records from nepritomny/manual to pritomny/scan.
+    """
+    scan_date = scan_timestamp.date()
+    scan_naive = scan_timestamp.replace(tzinfo=None)
+
+    # Find all subjects this ISIC is enrolled in
+    enroll_stmt = select(Enrollment.subject_id).where(
+        Enrollment.isic_id == isic_id
+    )
+    enroll_result = await session.execute(enroll_stmt)
+    subject_ids = list(enroll_result.scalars().all())
+
+    if not subject_ids:
+        logger.debug("No enrollments found for isic_id={}", isic_id)
+        return []
+
+    # Find lessons on scan_date for enrolled subjects (not cancelled)
+    lesson_stmt = (
+        select(Lesson)
+        .join(ScheduleEntry, Lesson.schedule_entry_id == ScheduleEntry.id)
+        .where(
+            Lesson.date == scan_date,
+            Lesson.cancelled == False,  # noqa: E712
+            ScheduleEntry.subject_id.in_(subject_ids),
+        )
+        .options(selectinload(Lesson.schedule_entry))
+    )
+    lesson_result = await session.execute(lesson_stmt)
+    lessons = list(lesson_result.scalars().all())
+
+    if not lessons:
+        logger.debug("No lessons found on {} for enrolled subjects", scan_date)
+        return []
+
+    updated: list[AttendanceRecord] = []
+
+    for lesson in lessons:
+        entry = lesson.schedule_entry
+        window_start = datetime.combine(
+            scan_date, entry.start_time
+        ) - timedelta(minutes=settings.scan_window_before_minutes)
+        window_end = datetime.combine(
+            scan_date, entry.end_time
+        ) + timedelta(minutes=settings.scan_window_after_minutes)
+
+        if not (window_start <= scan_naive <= window_end):
+            continue
+
+        # Find the attendance record for this lesson + ISIC
+        att_stmt = select(AttendanceRecord).where(
+            AttendanceRecord.lesson_id == lesson.id,
+            AttendanceRecord.isic_id == isic_id,
+        )
+        att_result = await session.execute(att_stmt)
+        record = att_result.scalar_one_or_none()
+
+        if record is None:
+            continue
+
+        # Idempotent: already scanned
+        if record.scan_id is not None:
+            continue
+
+        # Preserve manual overrides (status != nepritomny set by teacher)
+        if (
+            record.marked_by == MarkedBy.manual
+            and record.status != AttendanceStatus.nepritomny
+        ):
+            continue
+
+        record.status = AttendanceStatus.pritomny
+        record.marked_by = MarkedBy.scan
+        record.scan_id = scan_id
+        updated.append(record)
+
+    if updated:
+        await session.commit()
+
+    return updated

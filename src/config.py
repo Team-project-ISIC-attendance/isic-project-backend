@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     admin_email: str = "admin@stuba.sk"
     admin_password: str = "admin"
 
+    scan_window_before_minutes: int = 15
+    scan_window_after_minutes: int = 5
+
 
 settings = Settings()
 

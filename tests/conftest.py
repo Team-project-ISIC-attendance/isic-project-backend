@@ -22,6 +22,7 @@ from testcontainers.core.container import DockerContainer
 os.environ.setdefault("HTTP_HOST", "localhost")
 os.environ.setdefault("HTTP_PORT", "8000")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/database.db")
 
 from loguru import logger
 
