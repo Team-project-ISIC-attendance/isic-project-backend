@@ -11,6 +11,7 @@ class AttendanceStatus(enum.Enum):
     pritomny = "pritomny"
     nepritomny = "nepritomny"
     nahrada = "nahrada"
+    ospravedlneny = "ospravedlneny"
 
 
 class MarkedBy(enum.Enum):

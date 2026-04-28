@@ -30,7 +30,7 @@ def _day_name_sk(day: int) -> str:
 
 
 def _compute_summary(records: list[AttendanceRecord]) -> dict[str, int]:
-    counts = {"total": 0, "pritomny": 0, "nepritomny": 0, "nahrada": 0}
+    counts = {"total": 0, "pritomny": 0, "nepritomny": 0, "nahrada": 0, "ospravedlneny": 0}
     for record in records:
         counts["total"] += 1
         counts[record.status.value] += 1
@@ -126,6 +126,62 @@ async def update_attendance_status(
 
     record.status = AttendanceStatus(status_str)
     record.marked_by = MarkedBy.manual
+    await session.commit()
+    await session.refresh(record)
+    return record
+
+
+async def move_attendance(
+    session: AsyncSession,
+    attendance_id: int,
+    target_lesson_id: int,
+) -> AttendanceRecord | str:
+    """Move an attendance record to a different lesson.
+
+    Returns the updated record on success, or an error string on failure.
+    """
+    # Load source attendance with lesson → schedule_entry → subject
+    stmt = (
+        select(AttendanceRecord)
+        .where(AttendanceRecord.id == attendance_id)
+        .options(
+            selectinload(AttendanceRecord.lesson)
+            .selectinload(Lesson.schedule_entry)
+            .selectinload(ScheduleEntry.subject),
+        )
+    )
+    result = await session.execute(stmt)
+    record = result.scalar_one_or_none()
+    if record is None:
+        return "Attendance record not found"
+
+    source_subject_id = record.lesson.schedule_entry.subject_id
+
+    # Load target lesson with schedule_entry
+    target_stmt = (
+        select(Lesson)
+        .where(Lesson.id == target_lesson_id)
+        .options(selectinload(Lesson.schedule_entry))
+    )
+    target_result = await session.execute(target_stmt)
+    target_lesson = target_result.scalar_one_or_none()
+    if target_lesson is None:
+        return "Target lesson not found"
+
+    # Validate same subject
+    if target_lesson.schedule_entry.subject_id != source_subject_id:
+        return "Target lesson belongs to a different subject"
+
+    # Check for duplicate (same student + target lesson)
+    dup_stmt = select(AttendanceRecord).where(
+        AttendanceRecord.lesson_id == target_lesson_id,
+        AttendanceRecord.isic_id == record.isic_id,
+    )
+    dup_result = await session.execute(dup_stmt)
+    if dup_result.scalar_one_or_none() is not None:
+        return "Student already has an attendance record in the target lesson"
+
+    record.lesson_id = target_lesson_id
     await session.commit()
     await session.refresh(record)
     return record

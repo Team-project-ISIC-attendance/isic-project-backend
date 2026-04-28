@@ -30,6 +30,7 @@ class AttendanceSummary(BaseModel):
     pritomny: int
     nepritomny: int
     nahrada: int
+    ospravedlneny: int
 
 
 class AttendanceResponse(BaseModel):
@@ -44,7 +45,7 @@ class AttendanceUpdateRequest(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str) -> str:
-        allowed = {"pritomny", "nepritomny", "nahrada"}
+        allowed = {"pritomny", "nepritomny", "nahrada", "ospravedlneny"}
         if v not in allowed:
             msg = f"Status must be one of: {', '.join(sorted(allowed))}"
             raise ValueError(msg)
@@ -55,3 +56,13 @@ class AttendanceUpdateResponse(BaseModel):
     attendance_id: int
     status: str
     marked_by: str
+
+
+class AttendanceMoveRequest(BaseModel):
+    target_lesson_id: int
+
+
+class AttendanceMoveResponse(BaseModel):
+    attendance_id: int
+    lesson_id: int
+    status: str
