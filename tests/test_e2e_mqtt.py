@@ -47,7 +47,7 @@ async def test_mqtt_json_message_with_required_fields_stored_in_database(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
 
     await wait_for_message_processing()
@@ -76,7 +76,7 @@ async def test_mqtt_json_message_stored_in_database(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
 
     await wait_for_message_processing()
@@ -107,7 +107,7 @@ async def test_timestamp_generated_on_backend(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
 
     await wait_for_message_processing()
@@ -140,7 +140,7 @@ async def test_timestamp_ignored_if_provided_in_message(
     }
     before_message = datetime.now(UTC)
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
 
     await wait_for_message_processing()
@@ -169,7 +169,7 @@ async def test_plain_text_message_rejected(
     isic_identifier = "PLAINTEXT123"
     
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", isic_identifier.encode("utf-8")
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", isic_identifier.encode("utf-8")
     )
 
     await wait_for_message_processing()
@@ -193,7 +193,7 @@ async def test_multiple_mqtt_messages_stored_in_database(
             "isic_identifier": identifier,
         }
         await publish_message(
-            mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+            mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
         )
         await asyncio.sleep(0.1)
 
@@ -218,7 +218,7 @@ async def test_can_fetch_scans_after_mqtt_message(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
 
     await wait_for_message_processing()
@@ -252,7 +252,7 @@ async def test_link_isic_after_bulk_upload_via_mqtt(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
     await wait_for_message_processing()
 
@@ -296,7 +296,7 @@ async def test_link_isic_affects_all_scans_for_same_isic(
             "isic_identifier": isic_identifier,
         }
         await publish_message(
-            mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+            mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
         )
         await asyncio.sleep(0.1)
     
@@ -341,7 +341,7 @@ async def test_link_isic_after_bulk_upload_via_api_response(
         "isic_identifier": isic_identifier,
     }
     await publish_message(
-        mqtt_host, mqtt_port, "isic/scan", json.dumps(message)
+        mqtt_host, mqtt_port, "device/ISIC-ESP8266-001/attendance", json.dumps(message)
     )
     await wait_for_message_processing()
 
