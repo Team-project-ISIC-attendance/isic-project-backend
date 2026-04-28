@@ -8,6 +8,9 @@ class ScheduleEntryCreate(BaseModel):
     end_time: str
     room: str | None = None
     lesson_type: str
+    is_one_time: bool = False
+    recurrence_interval: int = 1
+    end_date: str | None = None
 
 
 class ScheduleEntryResponse(BaseModel):
@@ -21,3 +24,6 @@ class ScheduleEntryResponse(BaseModel):
     end_time: str
     room: str | None
     lesson_type: str
+    is_one_time: bool
+    recurrence_interval: int
+    end_date: str | None
