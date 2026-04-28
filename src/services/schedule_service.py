@@ -20,6 +20,9 @@ async def create_schedule_entry(
     end_time: str,
     room: str | None,
     lesson_type: str,
+    is_one_time: bool = False,
+    recurrence_interval: int = 1,
+    end_date: str | None = None,
 ) -> ScheduleEntry:
     semester = await session.get(Semester, semester_id)
     if semester is None:
@@ -28,6 +31,9 @@ async def create_schedule_entry(
     parsed_start = datetime.strptime(start_time, "%H:%M").time()
     parsed_end = datetime.strptime(end_time, "%H:%M").time()
     parsed_type = LessonType(lesson_type)
+    parsed_end_date: date | None = None
+    if end_date is not None:
+        parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     entry = ScheduleEntry(
         semester_id=semester_id,
@@ -37,14 +43,23 @@ async def create_schedule_entry(
         end_time=parsed_end,
         room=room,
         lesson_type=parsed_type,
+        is_one_time=is_one_time,
+        recurrence_interval=recurrence_interval,
+        end_date=parsed_end_date,
     )
     session.add(entry)
     await session.flush()
 
     for week in range(1, semester.total_weeks + 1):
+        if is_one_time and week > 1:
+            break
+        if recurrence_interval > 1 and (week - 1) % recurrence_interval != 0:
+            continue
         lesson_date = semester.start_date + timedelta(
             days=(week - 1) * 7 + (day_of_week - 1)
         )
+        if parsed_end_date is not None and lesson_date > parsed_end_date:
+            break
         lesson = Lesson(
             schedule_entry_id=entry.id,
             week_number=week,

@@ -1,7 +1,7 @@
 import enum
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Time
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base
@@ -29,6 +29,15 @@ class ScheduleEntry(Base):
     room: Mapped[str | None] = mapped_column(String, nullable=True)
     lesson_type: Mapped[LessonType] = mapped_column(
         Enum(LessonType), nullable=False
+    )
+    is_one_time: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    recurrence_interval: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    end_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True, default=None
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

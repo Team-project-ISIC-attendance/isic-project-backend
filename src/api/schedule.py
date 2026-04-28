@@ -29,6 +29,9 @@ def _entry_response(entry: "ScheduleEntry") -> ScheduleEntryResponse:  # type: i
         end_time=entry.end_time.strftime("%H:%M"),
         room=entry.room,
         lesson_type=entry.lesson_type.value,
+        is_one_time=entry.is_one_time,
+        recurrence_interval=entry.recurrence_interval,
+        end_date=entry.end_date.isoformat() if entry.end_date else None,
     )
 
 
@@ -76,6 +79,9 @@ async def create_schedule(
             end_time=data.end_time,
             room=data.room,
             lesson_type=data.lesson_type,
+            is_one_time=data.is_one_time,
+            recurrence_interval=data.recurrence_interval,
+            end_date=data.end_date,
         )
     except ValueError as err:
         raise HTTPException(
