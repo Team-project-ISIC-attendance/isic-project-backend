@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import select
@@ -12,9 +12,12 @@ from src.models.attendance import (
     MarkedBy,
 )
 from src.models.enrollment import Enrollment
+from src.models.isic import ISIC
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
+from src.models.semester import Semester
 from src.models.subject import Subject
+from src.services.schedule_service import compute_week_date_range
 
 _DAY_NAMES_SK = {
     1: "pondelok",
@@ -185,6 +188,139 @@ async def move_attendance(
     await session.commit()
     await session.refresh(record)
     return record
+
+
+def _is_current_week(semester_start: date, week_number: int, today: date) -> bool:
+    """Check if a week is the current week based on semester start date."""
+    monday = semester_start + timedelta(days=(week_number - 1) * 7)
+    sunday = monday + timedelta(days=6)
+    return monday <= today <= sunday
+
+
+async def get_schedule_entry_overview(
+    session: AsyncSession,
+    subject_id: int,
+    entry_id: int,
+    semester_id: int,
+) -> dict[str, object] | None:
+    """Get the full attendance overview for a schedule entry across all weeks."""
+    # Load entry with subject, lessons (with attendance records + isic)
+    stmt = (
+        select(ScheduleEntry)
+        .where(ScheduleEntry.id == entry_id)
+        .options(
+            selectinload(ScheduleEntry.subject).selectinload(Subject.teacher),
+            selectinload(ScheduleEntry.lessons)
+            .selectinload(Lesson.attendance_records)
+            .selectinload(AttendanceRecord.isic),
+        )
+    )
+    result = await session.execute(stmt)
+    entry = result.scalar_one_or_none()
+    if entry is None:
+        return None
+
+    # Validate entry belongs to subject
+    if entry.subject_id != subject_id:
+        return None
+
+    # Load semester for start_date and total_weeks
+    sem_stmt = select(Semester).where(Semester.id == semester_id)
+    sem_result = await session.execute(sem_stmt)
+    semester = sem_result.scalar_one_or_none()
+    if semester is None:
+        return None
+
+    subject = entry.subject
+    today = date.today()
+
+    # Build lesson lookup: week_number → Lesson
+    lesson_map: dict[int, Lesson] = {}
+    for lesson in entry.lessons:
+        lesson_map[lesson.week_number] = lesson
+
+    # Build weeks list
+    weeks: list[dict[str, object]] = []
+    for week_num in range(1, semester.total_weeks + 1):
+        lesson = lesson_map.get(week_num)
+        weeks.append({
+            "week_number": week_num,
+            "date_range": compute_week_date_range(semester.start_date, week_num),
+            "lesson_id": lesson.id if lesson else None,
+            "is_current": _is_current_week(semester.start_date, week_num, today),
+        })
+
+    # Load enrollments with ISIC data, sorted by (last_name, first_name)
+    enroll_stmt = (
+        select(Enrollment)
+        .where(Enrollment.subject_id == subject_id)
+        .options(selectinload(Enrollment.isic))
+    )
+    enroll_result = await session.execute(enroll_stmt)
+    enrollments = list(enroll_result.scalars().all())
+    enrollments.sort(
+        key=lambda e: (e.isic.last_name or "", e.isic.first_name or "")
+    )
+
+    # Build attendance lookup: (lesson_id, isic_id) → AttendanceRecord
+    att_lookup: dict[tuple[int, int], AttendanceRecord] = {}
+    for lesson in entry.lessons:
+        for record in lesson.attendance_records:
+            att_lookup[(lesson.id, record.isic_id)] = record
+
+    # Build students list
+    students: list[dict[str, object]] = []
+    for enrollment in enrollments:
+        isic: ISIC = enrollment.isic
+        student_weeks: list[dict[str, object]] = []
+        for week_num in range(1, semester.total_weeks + 1):
+            lesson = lesson_map.get(week_num)
+            if lesson is None:
+                student_weeks.append({
+                    "week_number": week_num,
+                    "attendance_id": None,
+                    "status": None,
+                })
+            else:
+                record = att_lookup.get((lesson.id, isic.id))
+                student_weeks.append({
+                    "week_number": week_num,
+                    "attendance_id": record.id if record else None,
+                    "status": record.status.value if record else None,
+                })
+        students.append({
+            "isic_identifier": isic.isic_identifier,
+            "first_name": isic.first_name,
+            "last_name": isic.last_name,
+            "weeks": student_weeks,
+        })
+
+    # Build recurrence string
+    interval = entry.recurrence_interval
+    if entry.is_one_time:
+        recurrence = "Jednorazovo"
+    elif interval == 1:
+        recurrence = f"Tyzdenne v {_day_name_sk(entry.day_of_week)}"
+    else:
+        recurrence = f"Kazdy {interval}. tyzden v {_day_name_sk(entry.day_of_week)}"
+
+    schedule_entry_info: dict[str, object] = {
+        "id": entry.id,
+        "subject_name": subject.name,
+        "lesson_type": entry.lesson_type.value,
+        "start_time": entry.start_time.strftime("%H:%M"),
+        "end_time": entry.end_time.strftime("%H:%M"),
+        "day_of_week": entry.day_of_week,
+        "subject_color": subject.color,
+        "recurrence": recurrence,
+    }
+
+    return {
+        "schedule_entry": schedule_entry_info,
+        "weeks": weeks,
+        "students": students,
+        "teacher_id": subject.teacher_id,
+    }
 
 
 async def try_auto_record(

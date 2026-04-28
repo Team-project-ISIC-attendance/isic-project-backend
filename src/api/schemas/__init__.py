@@ -30,6 +30,13 @@ from src.api.schemas.lesson import (
     WeekLessonAttendanceSummary,
     WeekLessonResponse,
 )
+from src.api.schemas.overview import (
+    OverviewResponse,
+    OverviewScheduleEntry,
+    OverviewStudent,
+    OverviewStudentWeek,
+    OverviewWeek,
+)
 from src.api.schemas.schedule import ScheduleEntryCreate, ScheduleEntryResponse
 from src.api.schemas.semester import SemesterCreate, SemesterResponse
 from src.api.schemas.subject import SubjectCreate, SubjectResponse, SubjectUpdate
@@ -53,6 +60,11 @@ __all__ = [
     "ImportResult",
     "LessonResponse",
     "LessonUpdateRequest",
+    "OverviewResponse",
+    "OverviewScheduleEntry",
+    "OverviewStudent",
+    "OverviewStudentWeek",
+    "OverviewWeek",
     "RegisterRequest",
     "ScanQueryParams",
     "ScanResponse",

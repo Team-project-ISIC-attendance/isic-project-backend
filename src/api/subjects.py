@@ -1,11 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_user
-from src.api.schemas import SubjectCreate, SubjectResponse, SubjectUpdate
+from src.api.schemas import (
+    OverviewResponse,
+    SubjectCreate,
+    SubjectResponse,
+    SubjectUpdate,
+)
 from src.database.connection import get_db
 from src.models.user import User, UserRole
+from src.services.attendance_service import get_schedule_entry_overview
 from src.services.subject_service import (
     create_subject,
     delete_subject,
@@ -130,3 +136,40 @@ async def delete_subject_endpoint(
         )
     await delete_subject(db, subject_id)
     return {"detail": "Subject deleted"}
+
+
+@router.get(
+    "/{subject_id}/schedule-entries/{entry_id}/overview",
+    response_model=OverviewResponse,
+    summary="Get schedule entry attendance overview",
+    responses={
+        404: {"description": "Entry not found"},
+        403: {"description": "Not your subject"},
+    },
+)
+async def get_overview(
+    subject_id: int,
+    entry_id: int,
+    semester_id: int = Query(...),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> OverviewResponse:
+    result = await get_schedule_entry_overview(db, subject_id, entry_id, semester_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Schedule entry not found",
+        )
+    if (
+        current_user.role != UserRole.admin
+        and result["teacher_id"] != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your subject",
+        )
+    return OverviewResponse(
+        schedule_entry=result["schedule_entry"],
+        weeks=result["weeks"],
+        students=result["students"],
+    )
