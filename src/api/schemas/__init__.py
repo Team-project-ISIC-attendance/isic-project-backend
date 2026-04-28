@@ -1,5 +1,7 @@
 from src.api.schemas.attendance import (
     AttendanceLessonInfo,
+    AttendanceMoveRequest,
+    AttendanceMoveResponse,
     AttendanceResponse,
     AttendanceStudentEntry,
     AttendanceSummary,
@@ -35,6 +37,8 @@ from src.api.schemas.week import WeekNoteUpdate, WeekResponse
 
 __all__ = [
     "AttendanceLessonInfo",
+    "AttendanceMoveRequest",
+    "AttendanceMoveResponse",
     "AttendanceResponse",
     "AttendanceStudentEntry",
     "AttendanceSummary",
