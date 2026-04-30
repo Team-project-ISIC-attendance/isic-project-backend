@@ -385,9 +385,9 @@ async def test_e2e_export(
     assert att_csv_resp.status_code == 200
     att_csv = att_csv_resp.content.decode("utf-8-sig")
     # Verify all three statuses appear in the matrix
-    assert "pritomny" in att_csv.lower() or "P" in att_csv
-    assert "nepritomny" in att_csv.lower() or "N" in att_csv
-    assert "nahrada" in att_csv.lower() or "Á" in att_csv
+    assert "Prítomný" in att_csv
+    assert "Neprítomný" in att_csv
+    assert "Náhrada" in att_csv
 
 
 @pytest.mark.asyncio

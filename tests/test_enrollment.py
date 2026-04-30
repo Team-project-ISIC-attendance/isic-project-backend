@@ -251,7 +251,7 @@ async def test_import_csv_bad_row(
     assert body["imported"] == 2
     assert body["skipped"] == 0
     assert len(body["errors"]) == 1
-    assert body["errors"][0]["row"] == 2
+    assert body["errors"][0]["row"] == 3
     assert "Missing ISIC identifier" in body["errors"][0]["reason"]
 
 
@@ -297,6 +297,37 @@ async def test_import_csv_windows1250(
     last_names = {s["last_name"] for s in students}
     assert "Kov\u00e1\u010d" in last_names
     assert "Str\u00e1\u017e" in last_names
+
+
+@pytest.mark.asyncio
+async def test_import_csv_utf8_bom_header(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@enr-bom.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="EnrBom",
+    )
+    headers = await get_auth_header(test_client, "admin@enr-bom.sk", "pass")
+    _, subject_id, _ = await _create_subject_with_lessons(
+        test_client, headers, "EBO"
+    )
+
+    csv_text = (
+        "\ufeffISIC;Meno;Priezvisko\n"
+        "669000001;Jana;Nová\n"
+        "669000002;Martin;Starý\n"
+    )
+    csv_file = io.BytesIO(csv_text.encode("utf-8"))
+
+    import_resp = await test_client.post(
+        f"/subjects/{subject_id}/students/import",
+        files={"file": ("students.csv", csv_file, "text/csv")},
+        headers=headers,
+    )
+    assert import_resp.status_code == 200
+    body = import_resp.json()
+    assert body["imported"] == 2
+    assert body["errors"] == []
 
 
 @pytest.mark.asyncio

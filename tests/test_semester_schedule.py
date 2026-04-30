@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.attendance import AttendanceRecord
 from src.models.lesson import Lesson
 from src.models.user import UserRole
 from tests.test_auth import create_test_user, get_auth_header
@@ -126,6 +127,169 @@ async def test_create_schedule_lessons_generated(
     )
     lessons = result.scalars().all()
     assert len(lessons) == 13
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_adds_attendance_for_enrolled_students(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@sched-enrolled.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="Sched",
+    )
+    headers = await get_auth_header(
+        test_client, "admin@sched-enrolled.sk", "pass"
+    )
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Sched Enrolled Sem",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await test_client.post(
+        "/subjects",
+        json={"name": "EnrolledSubj", "code": "ES1", "color": "#FF0000"},
+        headers=headers,
+    )
+    subject_id = subj_resp.json()["id"]
+
+    await test_client.post(
+        f"/subjects/{subject_id}/students",
+        json={
+            "isic_identifier": "190000001",
+            "first_name": "Existing",
+            "last_name": "Student",
+        },
+        headers=headers,
+    )
+
+    sched_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 1,
+            "start_time": "09:00",
+            "end_time": "10:40",
+            "room": "B213",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    assert sched_resp.status_code == 201
+    entry_id = sched_resp.json()["id"]
+
+    lessons_result = await db_session.execute(
+        select(Lesson).where(Lesson.schedule_entry_id == entry_id)
+    )
+    lesson_ids = [lesson.id for lesson in lessons_result.scalars().all()]
+    records_result = await db_session.execute(
+        select(AttendanceRecord).where(AttendanceRecord.lesson_id.in_(lesson_ids))
+    )
+    assert len(records_result.scalars().all()) == 13
+
+
+@pytest.mark.asyncio
+async def test_update_schedule_entry_changes_fields_and_reconciles_lessons(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@sched-update.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="Sched",
+    )
+    headers = await get_auth_header(test_client, "admin@sched-update.sk", "pass")
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Sched Update Sem",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await test_client.post(
+        "/subjects",
+        json={"name": "UpdateSubj", "code": "US1", "color": "#FF0000"},
+        headers=headers,
+    )
+    subject_id = subj_resp.json()["id"]
+
+    sched_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 1,
+            "start_time": "09:00",
+            "end_time": "10:40",
+            "room": "B213",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    entry_id = sched_resp.json()["id"]
+
+    await test_client.post(
+        f"/subjects/{subject_id}/students",
+        json={
+            "isic_identifier": "191000001",
+            "first_name": "Enrolled",
+            "last_name": "Student",
+        },
+        headers=headers,
+    )
+
+    update_resp = await test_client.put(
+        f"/semesters/{semester_id}/schedule/{entry_id}",
+        json={
+            "subject_name": "UpdatedSubj",
+            "subject_color": "#00AA00",
+            "day_of_week": 2,
+            "start_time": "11:00",
+            "end_time": "12:30",
+            "room": "C101",
+            "lesson_type": "laboratorium",
+            "is_one_time": False,
+            "recurrence_interval": 2,
+            "end_date": None,
+        },
+        headers=headers,
+    )
+    assert update_resp.status_code == 200
+    body = update_resp.json()
+    assert body["subject_name"] == "UpdatedSubj"
+    assert body["subject_color"] == "#00AA00"
+    assert body["day_of_week"] == 2
+    assert body["start_time"] == "11:00"
+    assert body["end_time"] == "12:30"
+    assert body["room"] == "C101"
+    assert body["lesson_type"] == "laboratorium"
+    assert body["recurrence_interval"] == 2
+
+    lessons_result = await db_session.execute(
+        select(Lesson).where(Lesson.schedule_entry_id == entry_id)
+    )
+    lessons = lessons_result.scalars().all()
+    assert len(lessons) == 7
+    assert sorted(lesson.week_number for lesson in lessons) == [
+        1, 3, 5, 7, 9, 11, 13,
+    ]
+
+    records_result = await db_session.execute(
+        select(AttendanceRecord).where(
+            AttendanceRecord.lesson_id.in_([lesson.id for lesson in lessons])
+        )
+    )
+    assert len(records_result.scalars().all()) == 7
 
 
 @pytest.mark.asyncio

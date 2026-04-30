@@ -1,14 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_user
-from src.api.schemas import ScheduleEntryCreate, ScheduleEntryResponse
+from src.api.schemas import (
+    ScheduleEntryCreate,
+    ScheduleEntryResponse,
+    ScheduleEntryUpdate,
+)
 from src.database.connection import get_db
 from src.models.user import User
 from src.services.schedule_service import (
     create_schedule_entry,
     delete_schedule_entry,
     get_schedule_for_semester,
+    update_schedule_entry,
 )
 from src.services.semester_service import get_semester_by_id
 
@@ -88,6 +94,55 @@ async def create_schedule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(err),
         ) from err
+    return _entry_response(entry)
+
+
+@router.put(
+    "/{entry_id}",
+    response_model=ScheduleEntryResponse,
+    summary="Update a schedule entry",
+    responses={
+        400: {"description": "Invalid schedule data"},
+        404: {"description": "Semester or schedule entry not found"},
+        409: {"description": "Subject update conflict"},
+    },
+)
+async def update_schedule(
+    semester_id: int,
+    entry_id: int,
+    data: ScheduleEntryUpdate,
+    _user: User = Depends(get_current_user),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> ScheduleEntryResponse:
+    try:
+        entry = await update_schedule_entry(
+            db,
+            semester_id=semester_id,
+            entry_id=entry_id,
+            day_of_week=data.day_of_week,
+            start_time=data.start_time,
+            end_time=data.end_time,
+            room=data.room,
+            lesson_type=data.lesson_type,
+            is_one_time=data.is_one_time,
+            recurrence_interval=data.recurrence_interval,
+            end_date=data.end_date,
+            subject_name=data.subject_name,
+            subject_color=data.subject_color,
+        )
+    except IntegrityError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Subject update conflict",
+        ) from err
+    except ValueError as err:
+        detail = str(err)
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in detail.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from err
     return _entry_response(entry)
 
 
