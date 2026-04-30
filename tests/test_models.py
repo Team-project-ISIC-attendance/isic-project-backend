@@ -139,7 +139,7 @@ async def test_migration_existing_db() -> None:
 
 @pytest.mark.asyncio
 async def test_migration_rollback() -> None:
-    """Upgrade head, downgrade -1; new tables drop, old ones stay."""
+    """Upgrade head, downgrade to legacy schema; new tables drop."""
     with tempfile.NamedTemporaryFile(
         suffix=DATABASE_FILE_SUFFIX, delete=False
     ) as f:
@@ -153,7 +153,7 @@ async def test_migration_rollback() -> None:
         for t in ALL_DOMAIN_TABLES:
             assert t in tables_after_up
 
-        await asyncio.to_thread(command.downgrade, cfg, "-1")
+        await asyncio.to_thread(command.downgrade, cfg, PRE_MIGRATION_REVISION)
 
         tables_after_down = _get_table_names(db_path)
         for t in NEW_TABLES:

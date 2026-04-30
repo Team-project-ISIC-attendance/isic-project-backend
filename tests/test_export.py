@@ -229,7 +229,7 @@ async def test_export_attendance_csv(
     assert header_cols[1] == "Meno"
     assert header_cols[2] == "Priezvisko"
     assert len(header_cols) == 3 + 13  # 3 identity + 13 lessons
-    assert "T1 Cvicenie" in header_cols[3]
+    assert header_cols[3] == "T1 2026-02-16 Cvičenie 09:00-10:40 B213"
 
     # 2 student rows
     assert len(lines) == 3
@@ -237,12 +237,12 @@ async def test_export_attendance_csv(
     # Find Alpha row (sorted by last_name: Alpha before Beta)
     alpha_cols = lines[1].split(",")
     assert alpha_cols[0] == "130000001"
-    assert alpha_cols[3] == "pritomny"  # T1 changed
+    assert alpha_cols[3] == "Prítomný"  # T1 changed
 
     # Beta row - all nepritomny
     beta_cols = lines[2].split(",")
     assert beta_cols[0] == "130000002"
-    assert beta_cols[3] == "nepritomny"
+    assert beta_cols[3] == "Neprítomný"
 
 
 @pytest.mark.asyncio

@@ -7,8 +7,16 @@ HEADER_MAP: dict[str, str] = {
     "isic_identifier": "isic_identifier",
     "isic": "isic_identifier",
     "id": "isic_identifier",
+    "identifikator": "isic_identifier",
+    "identifikátor": "isic_identifier",
+    "cislo": "isic_identifier",
+    "číslo": "isic_identifier",
+    "cislo karty": "isic_identifier",
+    "číslo karty": "isic_identifier",
     "first_name": "first_name",
     "meno": "first_name",
+    "krstne meno": "first_name",
+    "krstné meno": "first_name",
     "last_name": "last_name",
     "priezvisko": "last_name",
 }
@@ -30,7 +38,7 @@ def _detect_delimiter(first_line: str) -> str:
 def _normalize_headers(headers: list[str]) -> dict[int, str]:
     mapping: dict[int, str] = {}
     for idx, header in enumerate(headers):
-        key = header.strip().lower()
+        key = header.strip().removeprefix("\ufeff").lower()
         if key in HEADER_MAP:
             mapping[idx] = HEADER_MAP[key]
     return mapping
@@ -53,7 +61,7 @@ def parse_csv(
     rows: list[dict[str, str]] = []
     errors: list[ImportError_] = []
 
-    for row_idx, row in enumerate(reader, start=1):
+    for row_idx, row in enumerate(reader, start=2):
         record: dict[str, str] = {}
         for col_idx, field_name in col_map.items():
             if col_idx < len(row):

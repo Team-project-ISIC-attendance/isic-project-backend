@@ -13,6 +13,19 @@ class ScheduleEntryCreate(BaseModel):
     end_date: str | None = None
 
 
+class ScheduleEntryUpdate(BaseModel):
+    subject_name: str | None = None
+    subject_color: str | None = None
+    day_of_week: int
+    start_time: str
+    end_time: str
+    room: str | None = None
+    lesson_type: str
+    is_one_time: bool = False
+    recurrence_interval: int = 1
+    end_date: str | None = None
+
+
 class ScheduleEntryResponse(BaseModel):
     id: int
     subject_id: int

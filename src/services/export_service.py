@@ -11,6 +11,19 @@ from src.models.enrollment import Enrollment
 from src.models.schedule_entry import ScheduleEntry
 from src.models.subject import Subject
 
+LESSON_TYPE_LABELS: dict[str, str] = {
+    "prednaska": "Prednáška",
+    "cvicenie": "Cvičenie",
+    "laboratorium": "Laboratórium",
+}
+
+ATTENDANCE_STATUS_LABELS: dict[str, str] = {
+    "pritomny": "Prítomný",
+    "nepritomny": "Neprítomný",
+    "nahrada": "Náhrada",
+    "ospravedlneny": "Ospravedlnený",
+}
+
 
 async def get_students_data(
     session: AsyncSession, subject_id: int
@@ -65,17 +78,34 @@ async def get_attendance_matrix(
     )
     entries = entries_result.scalars().all()
 
-    # Collect all lessons sorted by (week_number, lesson_type)
-    lesson_info: list[tuple[int, int, str]] = []  # (week_number, lesson_id, type_label)
+    # Collect all lessons sorted by week, day, and start time.
+    lesson_info: list[tuple[int, str, str, int, str]] = []
     for entry in entries:
-        type_label = entry.lesson_type.value.capitalize()
+        type_label = LESSON_TYPE_LABELS.get(
+            entry.lesson_type.value, entry.lesson_type.value
+        )
+        time_range = (
+            f"{entry.start_time.strftime('%H:%M')}-"
+            f"{entry.end_time.strftime('%H:%M')}"
+        )
+        room = f" {entry.room}" if entry.room else ""
         for lesson in entry.lessons:
-            lesson_info.append((lesson.week_number, lesson.id, type_label))
+            cancelled = " zrušené" if lesson.cancelled else ""
+            header = (
+                f"T{lesson.week_number} {lesson.date.isoformat()} "
+                f"{type_label} {time_range}{room}{cancelled}"
+            )
+            sort_key = (
+                lesson.week_number,
+                lesson.date.isoformat(),
+                entry.start_time.strftime("%H:%M"),
+            )
+            lesson_info.append((*sort_key, lesson.id, header))
 
-    lesson_info.sort(key=lambda x: (x[0], x[2]))
+    lesson_info.sort(key=lambda x: (x[0], x[1], x[2]))
 
-    column_headers = [f"T{week} {label}" for week, _, label in lesson_info]
-    lesson_ids_ordered = [lid for _, lid, _ in lesson_info]
+    column_headers = [header for _, _, _, _, header in lesson_info]
+    lesson_ids_ordered = [lesson_id for _, _, _, lesson_id, _ in lesson_info]
 
     # Get all enrollments with ISIC data
     enroll_result = await session.execute(
@@ -114,7 +144,7 @@ async def get_attendance_matrix(
         row = [isic.isic_identifier, isic.first_name or "", isic.last_name or ""]
         for lid in lesson_ids_ordered:
             status = status_lookup.get((lid, isic.id), "")
-            row.append(status)
+            row.append(ATTENDANCE_STATUS_LABELS.get(status, "Bez záznamu"))
         data_rows.append(row)
 
     return subject, column_headers, data_rows

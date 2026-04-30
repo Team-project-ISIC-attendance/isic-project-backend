@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.models.user import User, UserRole
 from src.services.auth_service import ensure_admin_exists, hash_password
 
@@ -154,7 +155,10 @@ async def test_auto_admin_creation(
     await ensure_admin_exists(db_session)
     response = await test_client.post(
         "/auth/login",
-        data={"username": "admin@stuba.sk", "password": "admin"},
+        data={
+            "username": settings.admin_email,
+            "password": settings.admin_password,
+        },
     )
     assert response.status_code == 200
     token = response.json()["access_token"]
