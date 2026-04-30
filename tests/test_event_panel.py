@@ -2,10 +2,8 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.attendance import AttendanceRecord
 from src.models.user import UserRole
 from tests.test_auth import create_test_user, get_auth_header
 
@@ -190,7 +188,7 @@ async def test_attendance_summary_includes_ospravedlneny(
 async def test_move_attendance_success(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """Test: POST move attendance to valid target lesson succeeds."""
+    """Test: POST move attendance marks the target lesson as a replacement."""
     await create_test_user(
         db_session, "admin@ep3.sk", "pass", role=UserRole.admin
     )
@@ -201,17 +199,6 @@ async def test_move_attendance_success(
     entry2_lesson_ids = data["entry2_lesson_ids"]
     first_lesson_id = entry1_lesson_ids[0]
     target_lesson_id = entry2_lesson_ids[0]
-    isic_id = data["isic_id"]
-
-    # Delete the existing attendance record at target lesson so move can succeed
-    # (enrollment backfill creates records for all lessons in the subject)
-    await db_session.execute(
-        delete(AttendanceRecord).where(
-            AttendanceRecord.lesson_id == target_lesson_id,
-            AttendanceRecord.isic_id == isic_id,
-        )
-    )
-    await db_session.commit()
 
     # Get attendance for first lesson
     att_resp = await test_client.get(
@@ -228,7 +215,21 @@ async def test_move_attendance_success(
     )
     assert move_resp.status_code == 200
     assert move_resp.json()["lesson_id"] == target_lesson_id
-    assert move_resp.json()["attendance_id"] == attendance_id
+    assert move_resp.json()["attendance_id"] != attendance_id
+    assert move_resp.json()["status"] == "nahrada"
+
+    source_resp = await test_client.get(
+        f"/lessons/{first_lesson_id}/attendance",
+        headers=headers,
+    )
+    target_resp = await test_client.get(
+        f"/lessons/{target_lesson_id}/attendance",
+        headers=headers,
+    )
+    assert source_resp.status_code == 200
+    assert target_resp.status_code == 200
+    assert source_resp.json()["students"][0]["status"] == "nepritomny"
+    assert target_resp.json()["students"][0]["status"] == "nahrada"
 
 
 @pytest.mark.asyncio
@@ -294,10 +295,10 @@ async def test_move_attendance_different_subject_fails(
 
 
 @pytest.mark.asyncio
-async def test_move_attendance_duplicate_fails(
+async def test_move_attendance_existing_target_record_succeeds(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """Test: POST move when target already has record for same student returns 400."""
+    """Test: POST move updates the pre-created target attendance record."""
     await create_test_user(
         db_session, "admin@ep5.sk", "pass", role=UserRole.admin
     )
@@ -305,10 +306,6 @@ async def test_move_attendance_duplicate_fails(
     data = await _setup_two_entries(test_client, headers)
 
     entry1_lesson_ids = data["entry1_lesson_ids"]
-    # Both entries have attendance for the same student (enrollment backfill).
-    # Lessons within the same entry are different weeks.
-    # Moving lesson 1 of entry1 to lesson 1 of entry2 should fail
-    # because entry2 lesson 1 already has an attendance record for this student.
     first_lesson_id = entry1_lesson_ids[0]
     entry2_lesson_ids = data["entry2_lesson_ids"]
     target_lesson_id = entry2_lesson_ids[0]
@@ -320,15 +317,42 @@ async def test_move_attendance_duplicate_fails(
     )
     attendance_id = att_resp.json()["students"][0]["attendance_id"]
 
-    # Target lesson already has attendance for same student (enrollment creates
-    # attendance for all lessons in all entries of the subject).
     move_resp = await test_client.post(
         f"/attendance/{attendance_id}/move",
         json={"target_lesson_id": target_lesson_id},
         headers=headers,
     )
+    assert move_resp.status_code == 200
+    assert move_resp.json()["lesson_id"] == target_lesson_id
+    assert move_resp.json()["status"] == "nahrada"
+
+
+@pytest.mark.asyncio
+async def test_move_attendance_same_lesson_fails(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Test: POST move to the current lesson returns 400."""
+    await create_test_user(
+        db_session, "admin@ep7.sk", "pass", role=UserRole.admin
+    )
+    headers = await get_auth_header(test_client, "admin@ep7.sk", "pass")
+    data = await _setup_two_entries(test_client, headers)
+
+    first_lesson_id = data["entry1_lesson_ids"][0]
+
+    att_resp = await test_client.get(
+        f"/lessons/{first_lesson_id}/attendance",
+        headers=headers,
+    )
+    attendance_id = att_resp.json()["students"][0]["attendance_id"]
+
+    move_resp = await test_client.post(
+        f"/attendance/{attendance_id}/move",
+        json={"target_lesson_id": first_lesson_id},
+        headers=headers,
+    )
     assert move_resp.status_code == 400
-    assert "already" in move_resp.json()["detail"].lower()
+    assert "current lesson" in move_resp.json()["detail"].lower()
 
 
 @pytest.mark.asyncio

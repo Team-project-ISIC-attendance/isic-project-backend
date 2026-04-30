@@ -105,6 +105,7 @@ async def get_week_lessons(
                 "pritomny": 0,
                 "nepritomny": 0,
                 "nahrada": 0,
+                "ospravedlneny": 0,
             }
         status_val = row.status if isinstance(row.status, str) else row.status.value
         summary_map[lid][status_val] += row.cnt
@@ -119,6 +120,7 @@ async def get_week_lessons(
             "pritomny": 0,
             "nepritomny": 0,
             "nahrada": 0,
+            "ospravedlneny": 0,
         })
         entries.append({
             "lesson_id": lesson.id,

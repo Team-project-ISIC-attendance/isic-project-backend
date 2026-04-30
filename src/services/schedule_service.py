@@ -224,6 +224,7 @@ async def update_schedule_entry(
         await session.execute(
             delete(Lesson).where(Lesson.id.in_(removed_lesson_ids))
         )
+        await session.flush()
 
     created_lessons: list[Lesson] = []
     for week_number, lesson_date in desired_lesson_dates.items():

@@ -17,6 +17,7 @@ class AttendanceLessonInfo(BaseModel):
 
 class AttendanceStudentEntry(BaseModel):
     attendance_id: int
+    enrollment_id: int | None
     isic_identifier: str
     first_name: str | None
     last_name: str | None

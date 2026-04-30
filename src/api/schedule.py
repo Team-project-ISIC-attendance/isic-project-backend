@@ -131,9 +131,13 @@ async def update_schedule(
             subject_color=data.subject_color,
         )
     except IntegrityError as err:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Subject update conflict",
+            detail=(
+                "Schedule entry conflict: one schedule entry can only have "
+                "one lesson in the same semester week"
+            ),
         ) from err
     except ValueError as err:
         detail = str(err)

@@ -3,6 +3,7 @@ from datetime import date
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.attendance import AttendanceRecord
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
 from src.models.semester import Semester
@@ -58,6 +59,18 @@ async def delete_semester(
     if semester is None:
         return False
 
+    lesson_ids_stmt = select(Lesson.id).where(
+        Lesson.schedule_entry_id.in_(
+            select(ScheduleEntry.id).where(
+                ScheduleEntry.semester_id == semester_id
+            )
+        )
+    )
+    await session.execute(
+        delete(AttendanceRecord).where(
+            AttendanceRecord.lesson_id.in_(lesson_ids_stmt)
+        )
+    )
     await session.execute(
         delete(Lesson).where(
             Lesson.schedule_entry_id.in_(

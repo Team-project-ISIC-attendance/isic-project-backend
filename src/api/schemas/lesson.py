@@ -17,6 +17,7 @@ class WeekLessonAttendanceSummary(BaseModel):
     pritomny: int
     nepritomny: int
     nahrada: int
+    ospravedlneny: int
 
 
 class WeekLessonResponse(BaseModel):
