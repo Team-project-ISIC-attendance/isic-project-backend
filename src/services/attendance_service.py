@@ -65,6 +65,13 @@ async def get_lesson_attendance(
 
     entry = lesson.schedule_entry
     subject = entry.subject
+    enrollment_result = await session.execute(
+        select(Enrollment).where(Enrollment.subject_id == subject.id)
+    )
+    enrollment_by_isic_id = {
+        enrollment.isic_id: enrollment.id
+        for enrollment in enrollment_result.scalars().all()
+    }
 
     lesson_info = {
         "id": lesson.id,
@@ -92,6 +99,7 @@ async def get_lesson_attendance(
             scan_timestamp = record.scan.timestamp.isoformat()
         students.append({
             "attendance_id": record.id,
+            "enrollment_id": enrollment_by_isic_id.get(record.isic_id),
             "isic_identifier": record.isic.isic_identifier,
             "first_name": record.isic.first_name,
             "last_name": record.isic.last_name,
@@ -171,23 +179,40 @@ async def move_attendance(
     if target_lesson is None:
         return "Target lesson not found"
 
+    if target_lesson.id == record.lesson_id:
+        return "Target lesson is the current lesson"
+
     # Validate same subject
     if target_lesson.schedule_entry.subject_id != source_subject_id:
         return "Target lesson belongs to a different subject"
 
-    # Check for duplicate (same student + target lesson)
-    dup_stmt = select(AttendanceRecord).where(
+    target_record_stmt = select(AttendanceRecord).where(
         AttendanceRecord.lesson_id == target_lesson_id,
         AttendanceRecord.isic_id == record.isic_id,
     )
-    dup_result = await session.execute(dup_stmt)
-    if dup_result.scalar_one_or_none() is not None:
-        return "Student already has an attendance record in the target lesson"
+    target_record_result = await session.execute(target_record_stmt)
+    target_record = target_record_result.scalar_one_or_none()
 
-    record.lesson_id = target_lesson_id
+    record.status = AttendanceStatus.nepritomny
+    record.marked_by = MarkedBy.manual
+    record.scan_id = None
+
+    if target_record is None:
+        target_record = AttendanceRecord(
+            lesson_id=target_lesson_id,
+            isic_id=record.isic_id,
+            status=AttendanceStatus.nahrada,
+            marked_by=MarkedBy.manual,
+        )
+        session.add(target_record)
+    else:
+        target_record.status = AttendanceStatus.nahrada
+        target_record.marked_by = MarkedBy.manual
+        target_record.scan_id = None
+
     await session.commit()
-    await session.refresh(record)
-    return record
+    await session.refresh(target_record)
+    return target_record
 
 
 def _is_current_week(semester_start: date, week_number: int, today: date) -> bool:

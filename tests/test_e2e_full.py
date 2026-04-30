@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.attendance import AttendanceRecord
 from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
@@ -568,6 +569,14 @@ async def test_e2e_edge_cases(
         )
     )
     assert len(lessons_result.scalars().all()) == 0
+
+    # Verify attendance records deleted before lessons.
+    attendance_result = await db_session.execute(
+        select(AttendanceRecord).where(
+            AttendanceRecord.lesson_id == active_lesson["id"]
+        )
+    )
+    assert len(attendance_result.scalars().all()) == 0
 
     # Verify week notes deleted
     notes_result = await db_session.execute(

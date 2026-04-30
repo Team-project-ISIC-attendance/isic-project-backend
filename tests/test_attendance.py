@@ -118,6 +118,7 @@ async def test_get_attendance_students(
     assert len(students) == 1
     student = students[0]
     assert "attendance_id" in student
+    assert student["enrollment_id"] == ids["enrollment_id"]
     assert student["isic_identifier"] == "100000001"
     assert student["first_name"] == "Tobias"
     assert student["last_name"] == "Banicka"
@@ -130,6 +131,7 @@ async def test_get_attendance_students(
     assert summary["nepritomny"] == 1
     assert summary["pritomny"] == 0
     assert summary["nahrada"] == 0
+    assert summary["ospravedlneny"] == 0
 
 
 @pytest.mark.asyncio
@@ -433,6 +435,47 @@ async def test_attendance_summary_counts(
     assert summary["pritomny"] == 2
     assert summary["nepritomny"] == 1
     assert summary["nahrada"] == 0
+
+
+@pytest.mark.asyncio
+async def test_week_lesson_summary_includes_ospravedlneny(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@att8.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="Att8",
+    )
+    headers = await get_auth_header(test_client, "admin@att8.sk", "pass")
+    ids = await _create_subject_with_enrolled_student(
+        test_client, headers, "AT08", "800000001"
+    )
+
+    lessons_resp = await test_client.get(
+        f"/semesters/{ids['semester_id']}/schedule/{ids['entry_id']}/lessons",
+        headers=headers,
+    )
+    lesson_id = lessons_resp.json()[0]["id"]
+    att_resp = await test_client.get(
+        f"/lessons/{lesson_id}/attendance", headers=headers
+    )
+    attendance_id = att_resp.json()["students"][0]["attendance_id"]
+
+    patch_resp = await test_client.patch(
+        f"/attendance/{attendance_id}",
+        json={"status": "ospravedlneny"},
+        headers=headers,
+    )
+    assert patch_resp.status_code == 200
+
+    week_resp = await test_client.get(
+        f"/semesters/{ids['semester_id']}/week/1/lessons",
+        headers=headers,
+    )
+    assert week_resp.status_code == 200
+    summary = week_resp.json()[0]["attendance_summary"]
+    assert summary["total"] == 1
+    assert summary["ospravedlneny"] == 1
+    assert summary["nepritomny"] == 0
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,4 @@
+import csv
 import io
 
 import pytest
@@ -221,28 +222,91 @@ async def test_export_attendance_csv(
     assert resp.headers["content-type"] == "text/csv; charset=utf-8"
 
     body = resp.content.decode("utf-8-sig")
-    lines = body.strip().split("\r\n")
-    header_cols = lines[0].split(",")
+    rows = list(csv.reader(io.StringIO(body)))
+    header_cols = rows[0]
 
-    # Header: ISIC, Meno, Priezvisko, then 13 lesson columns
-    assert header_cols[0] == "ISIC"
-    assert header_cols[1] == "Meno"
-    assert header_cols[2] == "Priezvisko"
-    assert len(header_cols) == 3 + 13  # 3 identity + 13 lessons
-    assert header_cols[3] == "T1 2026-02-16 Cvičenie 09:00-10:40 B213"
+    # Header: student id, ISIC, name fields, then 13 lesson columns
+    assert header_cols[0] == "Študent ID"
+    assert header_cols[1] == "ISIC"
+    assert header_cols[2] == "Meno"
+    assert header_cols[3] == "Priezvisko"
+    assert len(header_cols) == 4 + 13
+    assert header_cols[4] == (
+        "Týždeň 1 | 2026-02-16 | Cvičenie | 09:00-10:40 B213"
+    )
 
     # 2 student rows
-    assert len(lines) == 3
+    assert len(rows) == 3
 
     # Find Alpha row (sorted by last_name: Alpha before Beta)
-    alpha_cols = lines[1].split(",")
-    assert alpha_cols[0] == "130000001"
-    assert alpha_cols[3] == "Prítomný"  # T1 changed
+    alpha_cols = rows[1]
+    assert alpha_cols[0] == str(enroll1.json()["isic_id"])
+    assert alpha_cols[1] == "130000001"
+    assert alpha_cols[4] == "Prítomný"  # T1 changed
 
     # Beta row - all nepritomny
-    beta_cols = lines[2].split(",")
-    assert beta_cols[0] == "130000002"
-    assert beta_cols[3] == "Neprítomný"
+    beta_cols = rows[2]
+    assert beta_cols[0] == str(enroll2.json()["isic_id"])
+    assert beta_cols[1] == "130000002"
+    assert beta_cols[4] == "Neprítomný"
+
+
+@pytest.mark.asyncio
+async def test_export_attendance_includes_all_subject_lesson_types(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@exp-types.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="ExpTypes",
+    )
+    headers = await get_auth_header(test_client, "admin@exp-types.sk", "pass")
+    semester_id, subject_id, _ = await _create_subject_with_lessons(
+        test_client, headers, "EXTY"
+    )
+
+    for day, lesson_type, room in [
+        (2, "prednaska", "A101"),
+        (3, "laboratorium", "L204"),
+    ]:
+        schedule_resp = await test_client.post(
+            f"/semesters/{semester_id}/schedule",
+            json={
+                "subject_id": subject_id,
+                "day_of_week": day,
+                "start_time": "11:00",
+                "end_time": "12:40",
+                "room": room,
+                "lesson_type": lesson_type,
+            },
+            headers=headers,
+        )
+        assert schedule_resp.status_code == 201
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{subject_id}/students",
+        json={
+            "isic_identifier": "131000001",
+            "first_name": "Full",
+            "last_name": "Export",
+        },
+        headers=headers,
+    )
+    assert enroll_resp.status_code == 201
+
+    resp = await test_client.get(
+        f"/subjects/{subject_id}/export/attendance?semester_id={semester_id}&format=csv",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    rows = list(csv.reader(io.StringIO(resp.content.decode("utf-8-sig"))))
+    header_cols = rows[0]
+    assert len(header_cols) == 4 + (13 * 3)
+    assert "Týždeň 1 | 2026-02-16 | Cvičenie | 09:00-10:40 B213" in header_cols
+    assert "Týždeň 1 | 2026-02-17 | Prednáška | 11:00-12:40 A101" in header_cols
+    assert "Týždeň 1 | 2026-02-18 | Laboratórium | 11:00-12:40 L204" in header_cols
+    assert rows[1][0] == str(enroll_resp.json()["isic_id"])
+    assert rows[1][1] == "131000001"
 
 
 @pytest.mark.asyncio

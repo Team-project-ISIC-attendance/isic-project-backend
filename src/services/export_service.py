@@ -60,7 +60,7 @@ async def get_attendance_matrix(
     """Build attendance matrix for export.
 
     Returns (subject, column_headers, data_rows) where each data row is
-    [isic_identifier, first_name, last_name, status1, status2, ...].
+    [student_id, isic_identifier, first_name, last_name, status1, status2, ...].
     """
     subject_result = await session.execute(
         select(Subject).where(Subject.id == subject_id)
@@ -92,8 +92,8 @@ async def get_attendance_matrix(
         for lesson in entry.lessons:
             cancelled = " zrušené" if lesson.cancelled else ""
             header = (
-                f"T{lesson.week_number} {lesson.date.isoformat()} "
-                f"{type_label} {time_range}{room}{cancelled}"
+                f"Týždeň {lesson.week_number} | {lesson.date.isoformat()} | "
+                f"{type_label} | {time_range}{room}{cancelled}"
             )
             sort_key = (
                 lesson.week_number,
@@ -141,7 +141,12 @@ async def get_attendance_matrix(
     data_rows: list[list[str]] = []
     for enrollment in sorted_enrollments:
         isic = enrollment.isic
-        row = [isic.isic_identifier, isic.first_name or "", isic.last_name or ""]
+        row = [
+            str(isic.id),
+            isic.isic_identifier,
+            isic.first_name or "",
+            isic.last_name or "",
+        ]
         for lid in lesson_ids_ordered:
             status = status_lookup.get((lid, isic.id), "")
             row.append(ATTENDANCE_STATUS_LABELS.get(status, "Bez záznamu"))
@@ -185,7 +190,7 @@ def generate_attendance_csv(
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\r\n")
-    writer.writerow(["ISIC", "Meno", "Priezvisko", *column_headers])
+    writer.writerow(["Študent ID", "ISIC", "Meno", "Priezvisko", *column_headers])
     for row in data_rows:
         writer.writerow(row)
     return output.getvalue()
@@ -197,7 +202,7 @@ def generate_attendance_xlsx(
     """Generate XLSX bytes for attendance matrix."""
     wb = Workbook()
     ws = wb.active
-    ws.append(["ISIC", "Meno", "Priezvisko", *column_headers])
+    ws.append(["Študent ID", "ISIC", "Meno", "Priezvisko", *column_headers])
     for row in data_rows:
         ws.append(row)
     buffer = io.BytesIO()

@@ -291,6 +291,33 @@ async def test_update_schedule_entry_changes_fields_and_reconciles_lessons(
     )
     assert len(records_result.scalars().all()) == 7
 
+    second_update_resp = await test_client.put(
+        f"/semesters/{semester_id}/schedule/{entry_id}",
+        json={
+            "subject_name": "UpdatedSubj",
+            "subject_color": "#00AA00",
+            "day_of_week": 2,
+            "start_time": "11:00",
+            "end_time": "12:30",
+            "room": "C101",
+            "lesson_type": "laboratorium",
+            "is_one_time": False,
+            "recurrence_interval": 1,
+            "end_date": None,
+        },
+        headers=headers,
+    )
+    assert second_update_resp.status_code == 200
+
+    lessons_result = await db_session.execute(
+        select(Lesson).where(Lesson.schedule_entry_id == entry_id)
+    )
+    lessons = lessons_result.scalars().all()
+    assert len(lessons) == 13
+    assert sorted(lesson.week_number for lesson in lessons) == [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+    ]
+
 
 @pytest.mark.asyncio
 async def test_get_schedule_calendar_data(
