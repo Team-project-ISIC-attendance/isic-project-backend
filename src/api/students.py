@@ -75,6 +75,11 @@ async def enroll_student_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail="Student already enrolled in this subject",
         ) from err
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
     return _enrollment_response(enrollment)
 
 
@@ -91,7 +96,13 @@ async def import_students_endpoint(
 ) -> ImportResult:
     content = await file.read()
     rows, errors = parse_csv(content)
-    return await import_students(db, subject_id, rows, errors)
+    try:
+        return await import_students(db, subject_id, rows, errors)
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
 
 
 @router.delete(

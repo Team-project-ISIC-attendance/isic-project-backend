@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.attendance import AttendanceRecord, AttendanceStatus, MarkedBy
+from src.models.enrollment import Enrollment
 from src.models.isic import ISIC
 from src.models.user import UserRole
 from tests.test_auth import create_test_user, get_auth_header
@@ -328,6 +329,127 @@ async def test_import_csv_utf8_bom_header(
     body = import_resp.json()
     assert body["imported"] == 2
     assert body["errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_import_same_students_twice_skips_existing_enrollments(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@enr-repeat.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="EnrRepeat",
+    )
+    headers = await get_auth_header(test_client, "admin@enr-repeat.sk", "pass")
+    _, subject_id, _ = await _create_subject_with_lessons(
+        test_client, headers, "E09"
+    )
+
+    csv_text = (
+        "ISIC,Meno,Priezvisko\n"
+        "909000001,Adam,Opakovany\n"
+        "909000002,Beata,Opakovana\n"
+    )
+    csv_file = io.BytesIO(csv_text.encode("utf-8"))
+
+    first_resp = await test_client.post(
+        f"/subjects/{subject_id}/students/import",
+        files={"file": ("students.csv", csv_file, "text/csv")},
+        headers=headers,
+    )
+    assert first_resp.status_code == 200
+    assert first_resp.json()["imported"] == 2
+    assert first_resp.json()["skipped"] == 0
+
+    csv_file = io.BytesIO(csv_text.encode("utf-8"))
+    second_resp = await test_client.post(
+        f"/subjects/{subject_id}/students/import",
+        files={"file": ("students.csv", csv_file, "text/csv")},
+        headers=headers,
+    )
+    assert second_resp.status_code == 200
+    second_body = second_resp.json()
+    assert second_body["imported"] == 0
+    assert second_body["skipped"] == 2
+    assert second_body["errors"] == []
+
+    isic_result = await db_session.execute(
+        select(ISIC).where(
+            ISIC.isic_identifier.in_(["909000001", "909000002"])
+        )
+    )
+    assert len(isic_result.scalars().all()) == 2
+
+    enrollment_result = await db_session.execute(
+        select(Enrollment).where(Enrollment.subject_id == subject_id)
+    )
+    assert len(enrollment_result.scalars().all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_import_existing_isics_to_another_subject_reuses_records(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@enr-reuse.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="EnrReuse",
+    )
+    headers = await get_auth_header(test_client, "admin@enr-reuse.sk", "pass")
+    semester_id, first_subject_id, _ = await _create_subject_with_lessons(
+        test_client, headers, "E10A"
+    )
+
+    second_subject_resp = await test_client.post(
+        "/subjects",
+        json={"name": "Reuse Second", "code": "E10B", "color": "#00AA00"},
+        headers=headers,
+    )
+    second_subject_id = second_subject_resp.json()["id"]
+    await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": second_subject_id,
+            "day_of_week": 2,
+            "start_time": "11:00",
+            "end_time": "12:40",
+            "room": "B214",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+
+    first_csv = io.BytesIO(
+        b"ISIC,Meno,Priezvisko\n910000001,Reuse,Original\n"
+    )
+    first_import = await test_client.post(
+        f"/subjects/{first_subject_id}/students/import",
+        files={"file": ("students.csv", first_csv, "text/csv")},
+        headers=headers,
+    )
+    assert first_import.status_code == 200
+    assert first_import.json()["imported"] == 1
+
+    second_csv = io.BytesIO(
+        b"ISIC,Meno,Priezvisko\n910000001,Reuse,Changed\n"
+    )
+    second_import = await test_client.post(
+        f"/subjects/{second_subject_id}/students/import",
+        files={"file": ("students.csv", second_csv, "text/csv")},
+        headers=headers,
+    )
+    assert second_import.status_code == 200
+    assert second_import.json()["imported"] == 1
+    assert second_import.json()["skipped"] == 0
+
+    isic_result = await db_session.execute(
+        select(ISIC).where(ISIC.isic_identifier == "910000001")
+    )
+    isics = isic_result.scalars().all()
+    assert len(isics) == 1
+
+    enrollment_result = await db_session.execute(
+        select(Enrollment).where(Enrollment.isic_id == isics[0].id)
+    )
+    assert len(enrollment_result.scalars().all()) == 2
 
 
 @pytest.mark.asyncio

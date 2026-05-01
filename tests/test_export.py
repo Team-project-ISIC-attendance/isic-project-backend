@@ -107,6 +107,78 @@ async def test_export_students_csv(
 
 
 @pytest.mark.asyncio
+async def test_export_students_csv_for_one_time_subject(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@exp-one-time.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="ExpOneTime",
+    )
+    headers = await get_auth_header(test_client, "admin@exp-one-time.sk", "pass")
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Export One Time Sem",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await test_client.post(
+        "/subjects",
+        json={
+            "name": "Export One Time",
+            "code": "EXOT",
+            "color": "#FF5733",
+        },
+        headers=headers,
+    )
+    subject_id = subj_resp.json()["id"]
+
+    sched_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 3,
+            "start_time": "11:00",
+            "end_time": "12:40",
+            "room": "B312",
+            "lesson_type": "laboratorium",
+            "is_one_time": True,
+            "recurrence_interval": 1,
+        },
+        headers=headers,
+    )
+    assert sched_resp.status_code == 201
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{subject_id}/students",
+        json={
+            "isic_identifier": "110000099",
+            "first_name": "Jednorazova",
+            "last_name": "Studentka",
+        },
+        headers=headers,
+    )
+    assert enroll_resp.status_code == 201
+
+    resp = await test_client.get(
+        f"/subjects/{subject_id}/export/students?format=csv",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.content.decode("utf-8-sig")
+    assert body.strip().split("\r\n") == [
+        "ISIC,Meno,Priezvisko",
+        "110000099,Jednorazova,Studentka",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_export_students_xlsx(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:

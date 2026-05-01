@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +30,21 @@ _DAY_NAMES_SK = {
 
 def _day_name_sk(day: int) -> str:
     return _DAY_NAMES_SK.get(day, str(day))
+
+
+def _recurrence_label(entry: ScheduleEntry) -> str:
+    if entry.is_one_time:
+        return "Jednorazovo"
+    if entry.recurrence_interval == 1:
+        return f"Týždenne v {_day_name_sk(entry.day_of_week)}"
+    return (
+        f"Každý {entry.recurrence_interval}. týždeň "
+        f"v {_day_name_sk(entry.day_of_week)}"
+    )
+
+
+def _same_subject_name(source: Subject, target: Subject) -> bool:
+    return source.name.strip().casefold() == target.name.strip().casefold()
 
 
 def _compute_summary(records: list[AttendanceRecord]) -> dict[str, int]:
@@ -84,7 +99,7 @@ async def get_lesson_attendance(
         "end_time": entry.end_time.strftime("%H:%M"),
         "room": entry.room,
         "day_of_week": entry.day_of_week,
-        "recurrence": f"Tyzdenne v {_day_name_sk(entry.day_of_week)}",
+        "recurrence": _recurrence_label(entry),
     }
 
     sorted_records = sorted(
@@ -166,13 +181,19 @@ async def move_attendance(
     if record is None:
         return "Attendance record not found"
 
-    source_subject_id = record.lesson.schedule_entry.subject_id
+    source_entry = record.lesson.schedule_entry
+    source_subject = source_entry.subject
+    source_subject_id = source_subject.id
 
-    # Load target lesson with schedule_entry
+    # Load target lesson with schedule_entry → subject.
     target_stmt = (
         select(Lesson)
         .where(Lesson.id == target_lesson_id)
-        .options(selectinload(Lesson.schedule_entry))
+        .options(
+            selectinload(Lesson.schedule_entry).selectinload(
+                ScheduleEntry.subject
+            )
+        )
     )
     target_result = await session.execute(target_stmt)
     target_lesson = target_result.scalar_one_or_none()
@@ -182,9 +203,12 @@ async def move_attendance(
     if target_lesson.id == record.lesson_id:
         return "Target lesson is the current lesson"
 
-    # Validate same subject
-    if target_lesson.schedule_entry.subject_id != source_subject_id:
-        return "Target lesson belongs to a different subject"
+    target_entry = target_lesson.schedule_entry
+    target_subject = target_entry.subject
+    target_subject_id = target_subject.id
+
+    if not _same_subject_name(source_subject, target_subject):
+        return "Target lesson belongs to a different subject/event"
 
     target_record_stmt = select(AttendanceRecord).where(
         AttendanceRecord.lesson_id == target_lesson_id,
@@ -193,9 +217,78 @@ async def move_attendance(
     target_record_result = await session.execute(target_record_stmt)
     target_record = target_record_result.scalar_one_or_none()
 
-    record.status = AttendanceStatus.nepritomny
-    record.marked_by = MarkedBy.manual
-    record.scan_id = None
+    if source_subject_id == target_subject_id:
+        record.status = AttendanceStatus.nepritomny
+        record.marked_by = MarkedBy.manual
+        record.scan_id = None
+    else:
+        source_enrollment = await session.scalar(
+            select(Enrollment).where(
+                Enrollment.subject_id == source_subject_id,
+                Enrollment.isic_id == record.isic_id,
+            )
+        )
+        if source_enrollment is not None:
+            await session.delete(source_enrollment)
+
+        target_enrollment = await session.scalar(
+            select(Enrollment).where(
+                Enrollment.subject_id == target_subject_id,
+                Enrollment.isic_id == record.isic_id,
+            )
+        )
+        if target_enrollment is None:
+            session.add(
+                Enrollment(
+                    subject_id=target_subject_id,
+                    isic_id=record.isic_id,
+                )
+            )
+
+        source_lesson_ids_stmt = select(Lesson.id).where(
+            Lesson.schedule_entry_id.in_(
+                select(ScheduleEntry.id).where(
+                    ScheduleEntry.subject_id == source_subject_id
+                )
+            )
+        )
+        await session.execute(
+            delete(AttendanceRecord).where(
+                AttendanceRecord.isic_id == record.isic_id,
+                AttendanceRecord.lesson_id.in_(source_lesson_ids_stmt),
+            )
+        )
+
+        target_lesson_ids_result = await session.execute(
+            select(Lesson.id).where(
+                Lesson.schedule_entry_id.in_(
+                    select(ScheduleEntry.id).where(
+                        ScheduleEntry.subject_id == target_subject_id
+                    )
+                )
+            )
+        )
+        target_lesson_ids = list(target_lesson_ids_result.scalars().all())
+        existing_target_records_result = await session.execute(
+            select(AttendanceRecord.lesson_id).where(
+                AttendanceRecord.isic_id == record.isic_id,
+                AttendanceRecord.lesson_id.in_(target_lesson_ids),
+            )
+        )
+        existing_target_lesson_ids = set(
+            existing_target_records_result.scalars().all()
+        )
+        for lesson_id in target_lesson_ids:
+            if lesson_id == target_lesson_id or lesson_id in existing_target_lesson_ids:
+                continue
+            session.add(
+                AttendanceRecord(
+                    lesson_id=lesson_id,
+                    isic_id=record.isic_id,
+                    status=AttendanceStatus.nepritomny,
+                    marked_by=MarkedBy.manual,
+                )
+            )
 
     if target_record is None:
         target_record = AttendanceRecord(
@@ -320,15 +413,6 @@ async def get_schedule_entry_overview(
             "weeks": student_weeks,
         })
 
-    # Build recurrence string
-    interval = entry.recurrence_interval
-    if entry.is_one_time:
-        recurrence = "Jednorazovo"
-    elif interval == 1:
-        recurrence = f"Tyzdenne v {_day_name_sk(entry.day_of_week)}"
-    else:
-        recurrence = f"Kazdy {interval}. tyzden v {_day_name_sk(entry.day_of_week)}"
-
     schedule_entry_info: dict[str, object] = {
         "id": entry.id,
         "subject_name": subject.name,
@@ -337,7 +421,7 @@ async def get_schedule_entry_overview(
         "end_time": entry.end_time.strftime("%H:%M"),
         "day_of_week": entry.day_of_week,
         "subject_color": subject.color,
-        "recurrence": recurrence,
+        "recurrence": _recurrence_label(entry),
     }
 
     return {
