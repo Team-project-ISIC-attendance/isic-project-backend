@@ -52,7 +52,8 @@ The timestamp is automatically generated on the backend when the message is rece
 
 **Run with Docker Compose:**
 ```bash
-docker-compose up
+cd ..
+docker compose up --build backend mqtt
 ```
 
 Starts backend on port 8000 and MQTT broker on port 1883.
