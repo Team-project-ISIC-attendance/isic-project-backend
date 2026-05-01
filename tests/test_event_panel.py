@@ -185,6 +185,67 @@ async def test_attendance_summary_includes_ospravedlneny(
 
 
 @pytest.mark.asyncio
+async def test_one_time_lesson_attendance_uses_one_time_recurrence_label(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@ep-one-time.sk", "pass", role=UserRole.admin
+    )
+    headers = await get_auth_header(test_client, "admin@ep-one-time.sk", "pass")
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Event Panel One Time",
+            "start_date": "2026-03-02",
+            "end_date": "2026-05-31",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    assert sem_resp.status_code == 201
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await test_client.post(
+        "/subjects",
+        json={"name": "One Time", "code": "OT-EP", "color": "#4CAF50"},
+        headers=headers,
+    )
+    assert subj_resp.status_code == 201
+    subject_id = subj_resp.json()["id"]
+
+    entry_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 1,
+            "start_time": "09:00",
+            "end_time": "10:40",
+            "lesson_type": "prednaska",
+            "is_one_time": True,
+        },
+        headers=headers,
+    )
+    assert entry_resp.status_code == 201
+    entry_id = entry_resp.json()["id"]
+
+    lessons_resp = await test_client.get(
+        f"/semesters/{semester_id}/schedule/{entry_id}/lessons",
+        headers=headers,
+    )
+    assert lessons_resp.status_code == 200
+    lessons = lessons_resp.json()
+    assert len(lessons) == 1
+
+    att_resp = await test_client.get(
+        f"/lessons/{lessons[0]['id']}/attendance",
+        headers=headers,
+    )
+    assert att_resp.status_code == 200
+    assert att_resp.json()["lesson"]["recurrence"] == "Jednorazovo"
+
+
+@pytest.mark.asyncio
 async def test_move_attendance_success(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -230,6 +291,135 @@ async def test_move_attendance_success(
     assert target_resp.status_code == 200
     assert source_resp.json()["students"][0]["status"] == "nepritomny"
     assert target_resp.json()["students"][0]["status"] == "nahrada"
+
+
+@pytest.mark.asyncio
+async def test_move_attendance_same_named_subject_transfers_enrollment(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@ep-same-name.sk", "pass", role=UserRole.admin
+    )
+    headers = await get_auth_header(test_client, "admin@ep-same-name.sk", "pass")
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Event Panel Move Same Name",
+            "start_date": "2026-03-02",
+            "end_date": "2026-05-31",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    assert sem_resp.status_code == 201
+    semester_id = sem_resp.json()["id"]
+
+    source_subject_resp = await test_client.post(
+        "/subjects",
+        json={"name": "Practice Group", "code": "PG-A", "color": "#4CAF50"},
+        headers=headers,
+    )
+    target_subject_resp = await test_client.post(
+        "/subjects",
+        json={"name": "Practice Group", "code": "PG-B", "color": "#1570EF"},
+        headers=headers,
+    )
+    assert source_subject_resp.status_code == 201
+    assert target_subject_resp.status_code == 201
+    source_subject_id = source_subject_resp.json()["id"]
+    target_subject_id = target_subject_resp.json()["id"]
+
+    source_entry_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": source_subject_id,
+            "day_of_week": 1,
+            "start_time": "08:00",
+            "end_time": "09:40",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    target_entry_resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": target_subject_id,
+            "day_of_week": 2,
+            "start_time": "10:00",
+            "end_time": "11:40",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    assert source_entry_resp.status_code == 201
+    assert target_entry_resp.status_code == 201
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{source_subject_id}/students",
+        json={
+            "isic_identifier": "MOVE-SAME-001",
+            "first_name": "Eva",
+            "last_name": "Hruba",
+        },
+        headers=headers,
+    )
+    assert enroll_resp.status_code == 201
+
+    source_lessons_resp = await test_client.get(
+        f"/semesters/{semester_id}/schedule/{source_entry_resp.json()['id']}/lessons",
+        headers=headers,
+    )
+    target_lessons_resp = await test_client.get(
+        f"/semesters/{semester_id}/schedule/{target_entry_resp.json()['id']}/lessons",
+        headers=headers,
+    )
+    assert source_lessons_resp.status_code == 200
+    assert target_lessons_resp.status_code == 200
+    source_lesson_id = source_lessons_resp.json()[0]["id"]
+    target_lesson_id = target_lessons_resp.json()[0]["id"]
+
+    source_attendance_resp = await test_client.get(
+        f"/lessons/{source_lesson_id}/attendance",
+        headers=headers,
+    )
+    assert source_attendance_resp.status_code == 200
+    attendance_id = source_attendance_resp.json()["students"][0]["attendance_id"]
+
+    move_resp = await test_client.post(
+        f"/attendance/{attendance_id}/move",
+        json={"target_lesson_id": target_lesson_id},
+        headers=headers,
+    )
+    assert move_resp.status_code == 200
+    assert move_resp.json()["lesson_id"] == target_lesson_id
+    assert move_resp.json()["status"] == "nahrada"
+
+    source_students_resp = await test_client.get(
+        f"/subjects/{source_subject_id}/students",
+        headers=headers,
+    )
+    target_students_resp = await test_client.get(
+        f"/subjects/{target_subject_id}/students",
+        headers=headers,
+    )
+    assert source_students_resp.status_code == 200
+    assert target_students_resp.status_code == 200
+    assert source_students_resp.json() == []
+    assert len(target_students_resp.json()) == 1
+
+    source_after_resp = await test_client.get(
+        f"/lessons/{source_lesson_id}/attendance",
+        headers=headers,
+    )
+    target_after_resp = await test_client.get(
+        f"/lessons/{target_lesson_id}/attendance",
+        headers=headers,
+    )
+    assert source_after_resp.status_code == 200
+    assert target_after_resp.status_code == 200
+    assert source_after_resp.json()["students"] == []
+    assert target_after_resp.json()["students"][0]["status"] == "nahrada"
 
 
 @pytest.mark.asyncio

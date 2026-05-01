@@ -8,7 +8,13 @@ from src.models.attendance import AttendanceRecord, AttendanceStatus, MarkedBy
 from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
+from src.models.subject import Subject
 from src.services.scan_service import get_or_create_isic
+
+
+async def _ensure_subject_exists(session: AsyncSession, subject_id: int) -> None:
+    if await session.get(Subject, subject_id) is None:
+        raise ValueError("Subject not found")
 
 
 async def enroll_student(
@@ -18,6 +24,7 @@ async def enroll_student(
     first_name: str,
     last_name: str,
 ) -> Enrollment:
+    await _ensure_subject_exists(session, subject_id)
     isic = await get_or_create_isic(session, isic_identifier)
 
     if isic.first_name is None and first_name:
@@ -115,6 +122,7 @@ async def import_students(
     rows: list[dict[str, str]],
     errors: list[ImportError_],
 ) -> ImportResult:
+    await _ensure_subject_exists(session, subject_id)
     imported = 0
     skipped = 0
 

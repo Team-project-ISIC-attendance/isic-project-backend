@@ -1,3 +1,4 @@
+import io
 from datetime import date
 
 import pytest
@@ -6,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.attendance import AttendanceRecord
+from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
+from src.models.subject import Subject
 from src.models.user import UserRole
 from tests.test_auth import create_test_user, get_auth_header
 
@@ -437,6 +440,92 @@ async def test_delete_schedule_cascade(
         select(Lesson).where(Lesson.schedule_entry_id == entry_id)
     )
     assert len(result.scalars().all()) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_semester_removes_related_subject_and_blocks_import(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@del-sem-subj.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="DelSemSubj",
+    )
+    headers = await get_auth_header(
+        test_client, "admin@del-sem-subj.sk", "pass"
+    )
+
+    sem_resp = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Delete Subject Semester",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await test_client.post(
+        "/subjects",
+        json={"name": "Delete With Semester", "code": "DWS", "color": "#123456"},
+        headers=headers,
+    )
+    subject_id = subj_resp.json()["id"]
+
+    await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 1,
+            "start_time": "09:00",
+            "end_time": "10:40",
+            "room": "B213",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    import_resp = await test_client.post(
+        f"/subjects/{subject_id}/students/import",
+        files={
+            "file": (
+                "students.csv",
+                io.BytesIO(b"ISIC,Meno,Priezvisko\n920000001,Delete,Student\n"),
+                "text/csv",
+            )
+        },
+        headers=headers,
+    )
+    assert import_resp.status_code == 200
+    assert import_resp.json()["imported"] == 1
+
+    del_resp = await test_client.delete(
+        f"/semesters/{semester_id}", headers=headers
+    )
+    assert del_resp.status_code == 200
+
+    subject_result = await db_session.execute(
+        select(Subject).where(Subject.id == subject_id)
+    )
+    assert subject_result.scalar_one_or_none() is None
+
+    enrollment_result = await db_session.execute(
+        select(Enrollment).where(Enrollment.subject_id == subject_id)
+    )
+    assert len(enrollment_result.scalars().all()) == 0
+
+    stale_import_resp = await test_client.post(
+        f"/subjects/{subject_id}/students/import",
+        files={
+            "file": (
+                "students.csv",
+                io.BytesIO(b"ISIC,Meno,Priezvisko\n920000002,Stale,Student\n"),
+                "text/csv",
+            )
+        },
+        headers=headers,
+    )
+    assert stale_import_resp.status_code == 404
 
 
 @pytest.mark.asyncio

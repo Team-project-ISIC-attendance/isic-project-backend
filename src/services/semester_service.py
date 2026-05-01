@@ -4,9 +4,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.attendance import AttendanceRecord
+from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
 from src.models.semester import Semester
+from src.models.subject import Subject
 from src.models.week_note import WeekNote
 
 
@@ -59,6 +61,27 @@ async def delete_semester(
     if semester is None:
         return False
 
+    subject_ids_result = await session.execute(
+        select(ScheduleEntry.subject_id)
+        .where(ScheduleEntry.semester_id == semester_id)
+        .distinct()
+    )
+    subject_ids = list(subject_ids_result.scalars().all())
+    reusable_subject_ids_result = await session.execute(
+        select(ScheduleEntry.subject_id)
+        .where(
+            ScheduleEntry.subject_id.in_(subject_ids),
+            ScheduleEntry.semester_id != semester_id,
+        )
+        .distinct()
+    )
+    reusable_subject_ids = set(reusable_subject_ids_result.scalars().all())
+    delete_subject_ids = [
+        subject_id
+        for subject_id in subject_ids
+        if subject_id not in reusable_subject_ids
+    ]
+
     lesson_ids_stmt = select(Lesson.id).where(
         Lesson.schedule_entry_id.in_(
             select(ScheduleEntry.id).where(
@@ -86,6 +109,15 @@ async def delete_semester(
     await session.execute(
         delete(WeekNote).where(WeekNote.semester_id == semester_id)
     )
+    if delete_subject_ids:
+        await session.execute(
+            delete(Enrollment).where(
+                Enrollment.subject_id.in_(delete_subject_ids)
+            )
+        )
+        await session.execute(
+            delete(Subject).where(Subject.id.in_(delete_subject_ids))
+        )
     await session.delete(semester)
     await session.commit()
     return True

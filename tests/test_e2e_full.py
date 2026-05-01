@@ -9,6 +9,7 @@ from src.models.attendance import AttendanceRecord
 from src.models.enrollment import Enrollment
 from src.models.lesson import Lesson
 from src.models.schedule_entry import ScheduleEntry
+from src.models.subject import Subject
 from src.models.user import UserRole
 from src.models.week_note import WeekNote
 from src.mqtt.client import MQTTClient
@@ -584,11 +585,13 @@ async def test_e2e_edge_cases(
     )
     assert len(notes_result.scalars().all()) == 0
 
-    # Verify enrollments deleted (subject still exists, but enrollments should be gone
-    # since semester delete cascades through schedule entries -> lessons -> attendance,
-    # but enrollments are on subject, not semester — they should still exist)
+    # Verify subject and enrollment deleted with the semester.
+    subject_result = await db_session.execute(
+        select(Subject).where(Subject.id == subject_id)
+    )
+    assert subject_result.scalar_one_or_none() is None
+
     enroll_result = await db_session.execute(
         select(Enrollment).where(Enrollment.subject_id == subject_id)
     )
-    # Enrollments are tied to subject, not semester — they persist after semester delete
-    assert len(enroll_result.scalars().all()) == 1
+    assert len(enroll_result.scalars().all()) == 0
