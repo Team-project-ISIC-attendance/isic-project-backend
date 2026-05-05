@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.attendance import AttendanceRecord, AttendanceStatus, MarkedBy
 from src.models.enrollment import Enrollment
+from src.models.hardware_device import HardwareDevice
 from src.models.isic import ISIC
 from src.models.lesson import Lesson
 from src.models.scan import ISICScan
@@ -34,6 +35,7 @@ NEW_TABLES = frozenset({
     "lessons",
     "enrollments",
     "attendance_records",
+    "hardware_devices",
 })
 EXISTING_TABLES = frozenset({"isics", "isic_scans"})
 ALL_DOMAIN_TABLES = NEW_TABLES | EXISTING_TABLES
@@ -217,7 +219,14 @@ async def test_fk_relationships(db_session: AsyncSession) -> None:
     db_session.add(isic)
     await db_session.flush()
 
-    scan = ISICScan(isic_id=isic.id)
+    device = HardwareDevice(
+        device_id="FK-DEVICE-01",
+        base_topic="device",
+    )
+    db_session.add(device)
+    await db_session.flush()
+
+    scan = ISICScan(isic_id=isic.id, hardware_device_id=device.id)
     db_session.add(scan)
     await db_session.flush()
 
@@ -250,10 +259,13 @@ async def test_fk_relationships(db_session: AsyncSession) -> None:
     assert enrollment.isic.isic_identifier == "FK_STUDENT001"
 
     await db_session.refresh(record, ["lesson", "isic", "scan"])
+    await db_session.refresh(scan, ["hardware_device"])
     assert record.lesson.week_number == 1
     assert record.isic.isic_identifier == "FK_STUDENT001"
     assert record.scan is not None
     assert record.scan.id == scan.id
+    assert scan.hardware_device is not None
+    assert scan.hardware_device.device_id == "FK-DEVICE-01"
 
 
 @pytest.mark.asyncio

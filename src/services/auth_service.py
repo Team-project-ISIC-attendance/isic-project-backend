@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.models.user import User, UserRole
+from src.services.scan_service import normalize_isic_identifier
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -70,6 +71,7 @@ async def create_user(
     session: AsyncSession,
     email: str,
     hashed_password: str,
+    isic_identifier: str | None,
     first_name: str,
     last_name: str,
     role: UserRole,
@@ -77,6 +79,11 @@ async def create_user(
     user = User(
         email=email,
         hashed_password=hashed_password,
+        isic_identifier=(
+            normalize_isic_identifier(isic_identifier)
+            if isic_identifier
+            else None
+        ),
         first_name=first_name,
         last_name=last_name,
         role=role,
@@ -95,7 +102,23 @@ async def ensure_admin_exists(session: AsyncSession) -> None:
         session=session,
         email=settings.admin_email,
         hashed_password=hash_password(settings.admin_password),
+        isic_identifier=None,
         first_name="Admin",
         last_name="User",
         role=UserRole.admin,
     )
+
+
+async def update_user_isic_identifier(
+    session: AsyncSession,
+    user: User,
+    isic_identifier: str | None,
+) -> User:
+    user.isic_identifier = (
+        normalize_isic_identifier(isic_identifier)
+        if isic_identifier
+        else None
+    )
+    await session.commit()
+    await session.refresh(user)
+    return user

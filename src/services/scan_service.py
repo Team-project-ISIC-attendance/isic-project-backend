@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from src.models.isic import ISIC
 from src.models.scan import ISICScan
+from src.utils.datetime import coerce_utc_datetime
 
 
 def normalize_isic_identifier(isic_identifier: str) -> str:
@@ -42,18 +43,24 @@ async def get_or_create_isic(
 def _get_current_timestamp_if_none(timestamp: datetime | None) -> datetime:
     if timestamp is None:
         return datetime.now(UTC)
-    return timestamp
+    return coerce_utc_datetime(timestamp)
 
 
 async def create_scan(
     session: AsyncSession,
     isic_id: int,
     timestamp: datetime | None = None,
+    hardware_device_id: int | None = None,
+    mqtt_topic: str | None = None,
+    mqtt_sequence: int | None = None,
 ) -> ISICScan:
     scan_timestamp = _get_current_timestamp_if_none(timestamp)
 
     scan = ISICScan(
         isic_id=isic_id,
+        hardware_device_id=hardware_device_id,
+        mqtt_topic=mqtt_topic,
+        mqtt_sequence=mqtt_sequence,
         timestamp=scan_timestamp,
     )
     session.add(scan)
@@ -68,11 +75,21 @@ async def create_scan_with_identifier(
     first_name: str | None = None,
     last_name: str | None = None,
     timestamp: datetime | None = None,
+    hardware_device_id: int | None = None,
+    mqtt_topic: str | None = None,
+    mqtt_sequence: int | None = None,
 ) -> ISICScan:
     isic = await get_or_create_isic(
         session, isic_identifier, first_name, last_name
     )
-    return await create_scan(session, isic.id, timestamp)
+    return await create_scan(
+        session,
+        isic.id,
+        timestamp,
+        hardware_device_id=hardware_device_id,
+        mqtt_topic=mqtt_topic,
+        mqtt_sequence=mqtt_sequence,
+    )
 
 
 async def get_scans(
@@ -82,7 +99,10 @@ async def get_scans(
 ) -> list[ISICScan]:
     stmt = (
         select(ISICScan)
-        .options(selectinload(ISICScan.isic))
+        .options(
+            selectinload(ISICScan.isic),
+            selectinload(ISICScan.hardware_device),
+        )
         .order_by(ISICScan.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -97,7 +117,10 @@ async def get_scan_by_id(
 ) -> ISICScan | None:
     stmt = (
         select(ISICScan)
-        .options(selectinload(ISICScan.isic))
+        .options(
+            selectinload(ISICScan.isic),
+            selectinload(ISICScan.hardware_device),
+        )
         .where(ISICScan.id == scan_id)
     )
     result = await session.execute(stmt)

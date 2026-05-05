@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     mqtt_broker_host: str = "localhost"
     mqtt_broker_port: int = 1883
-    mqtt_topic: str = "device/+/#"
+    mqtt_topic: str = "+/+/#"
     mqtt_client_id: str = "isic-backend"
 
     app_name: str = "ISIC Backend"
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     scan_window_before_minutes: int = 15
     scan_window_after_minutes: int = 5
     schedule_time_zone: str = "UTC"
+    log_time_zone: str = "Europe/Bratislava"
 
 
 settings = Settings()
-

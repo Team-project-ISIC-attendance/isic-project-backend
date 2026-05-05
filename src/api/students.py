@@ -17,6 +17,7 @@ from src.services.enrollment_service import (
     import_students,
     list_enrolled_students,
 )
+from src.utils.datetime import isoformat_utc
 
 router = APIRouter(
     prefix="/subjects/{subject_id}/students",
@@ -31,7 +32,7 @@ def _enrollment_response(enrollment: "Enrollment") -> EnrollmentResponse:  # typ
         isic_identifier=enrollment.isic.isic_identifier,
         first_name=enrollment.isic.first_name,
         last_name=enrollment.isic.last_name,
-        enrolled_at=enrollment.enrolled_at.isoformat(),
+        enrolled_at=isoformat_utc(enrollment.enrolled_at) or "",
     )
 
 

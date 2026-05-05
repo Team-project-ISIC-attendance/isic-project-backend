@@ -41,7 +41,7 @@ SOCKET_TIMEOUT_SECONDS = 1
 MQTT_CLIENT_CONNECTION_DELAY_SECONDS = 1.0
 MQTT_CLIENT_STOP_TIMEOUT_SECONDS = 5.0
 TEST_CLIENT_ID_PREFIX = "test-client"
-TEST_MQTT_TOPIC = "device/+/#"
+TEST_MQTT_TOPIC = "+/+/#"
 DATABASE_FILE_SUFFIX = ".db"
 SOCKET_CONNECTION_SUCCESS = 0
 
@@ -205,4 +205,3 @@ async def test_client(
         yield client
 
     app.dependency_overrides.clear()
-

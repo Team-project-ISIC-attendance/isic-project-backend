@@ -4,6 +4,7 @@ import json
 from aiomqtt import Client
 
 DEFAULT_DEVICE_ID = "ISIC-ESP8266-001"
+DEFAULT_BASE_TOPIC = "device"
 
 
 async def publish_scan_message(
@@ -11,6 +12,9 @@ async def publish_scan_message(
     port: int,
     isic_identifier: str,
     timestamp: str | None = None,
+    *,
+    base_topic: str = DEFAULT_BASE_TOPIC,
+    device_id: str = DEFAULT_DEVICE_ID,
 ) -> None:
     """Publish a simulated NFC scan message using the OLD payload format.
 
@@ -25,7 +29,7 @@ async def publish_scan_message(
         hostname=hostname, port=port, identifier="test-simulator"
     ) as client:
         await client.publish(
-            f"device/{DEFAULT_DEVICE_ID}/attendance",
+            f"{base_topic}/{device_id}/attendance",
             payload=json.dumps(message),
         )
 
@@ -35,6 +39,7 @@ async def publish_attendance_message(
     port: int,
     uid: str,
     *,
+    base_topic: str = DEFAULT_BASE_TOPIC,
     device_id: str = DEFAULT_DEVICE_ID,
     timestamp_ms: int = 0,
     seq: int = 1,
@@ -53,7 +58,7 @@ async def publish_attendance_message(
         hostname=hostname, port=port, identifier="test-simulator-new"
     ) as client:
         await client.publish(
-            f"device/{device_id}/attendance",
+            f"{base_topic}/{device_id}/attendance",
             payload=json.dumps(payload),
         )
 
@@ -62,6 +67,7 @@ async def publish_health_message(
     hostname: str,
     port: int,
     *,
+    base_topic: str = DEFAULT_BASE_TOPIC,
     device_id: str = DEFAULT_DEVICE_ID,
     data: dict[str, object] | None = None,
 ) -> None:
@@ -71,7 +77,7 @@ async def publish_health_message(
         hostname=hostname, port=port, identifier="test-simulator-health"
     ) as client:
         await client.publish(
-            f"device/{device_id}/health",
+            f"{base_topic}/{device_id}/health",
             payload=json.dumps(payload),
         )
 
@@ -80,6 +86,7 @@ async def publish_metrics_message(
     hostname: str,
     port: int,
     *,
+    base_topic: str = DEFAULT_BASE_TOPIC,
     device_id: str = DEFAULT_DEVICE_ID,
     data: dict[str, object] | None = None,
 ) -> None:
@@ -89,9 +96,29 @@ async def publish_metrics_message(
         hostname=hostname, port=port, identifier="test-simulator-metrics"
     ) as client:
         await client.publish(
-            f"device/{device_id}/metrics",
+            f"{base_topic}/{device_id}/metrics",
             payload=json.dumps(payload),
         )
+
+
+async def publish_config_message(
+    hostname: str,
+    port: int,
+    payload: dict[str, object],
+    *,
+    base_topic: str = DEFAULT_BASE_TOPIC,
+    device_id: str = DEFAULT_DEVICE_ID,
+    section: str | None = None,
+) -> None:
+    topic = (
+        f"{base_topic}/{device_id}/config/{section}"
+        if section is not None
+        else f"{base_topic}/{device_id}/config"
+    )
+    async with Client(
+        hostname=hostname, port=port, identifier="test-simulator-config"
+    ) as client:
+        await client.publish(topic, payload=json.dumps(payload))
 
 
 async def publish_raw_message(

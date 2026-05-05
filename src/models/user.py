@@ -17,6 +17,9 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    isic_identifier: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True, index=True
+    )
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     last_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -32,4 +35,10 @@ class User(Base):
 
     subjects: Mapped[list["Subject"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Subject", back_populates="teacher"
+    )
+    hardware_devices: Mapped[list["HardwareDevice"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "HardwareDevice", back_populates="teacher"
+    )
+    device_pairing_sessions: Mapped[list["DevicePairingSession"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "DevicePairingSession", back_populates="teacher"
     )

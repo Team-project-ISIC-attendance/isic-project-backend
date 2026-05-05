@@ -10,6 +10,7 @@ from src.api.schemas import (
 from src.database.connection import get_db
 from src.models.scan import ISICScan
 from src.services.scan_service import get_scan_by_id, get_scans, update_isic
+from src.utils.datetime import isoformat_utc
 
 router = APIRouter(tags=["scans"])
 
@@ -59,7 +60,7 @@ async def update_isic_info(
         isic_identifier=updated_isic.isic_identifier,
         first_name=updated_isic.first_name,
         last_name=updated_isic.last_name,
-        created_at=updated_isic.created_at.isoformat(),
+        created_at=isoformat_utc(updated_isic.created_at) or "",
     )
 
 
@@ -70,7 +71,14 @@ def _scan_to_response(scan: ISICScan) -> ScanResponse:
         isic_identifier=scan.isic.isic_identifier,
         first_name=scan.isic.first_name,
         last_name=scan.isic.last_name,
-        timestamp=scan.timestamp.isoformat(),
-        created_at=scan.created_at.isoformat(),
+        hardware_device_id=scan.hardware_device_id,
+        hardware_device_identifier=(
+            scan.hardware_device.device_id
+            if scan.hardware_device is not None
+            else None
+        ),
+        mqtt_topic=scan.mqtt_topic,
+        mqtt_sequence=scan.mqtt_sequence,
+        timestamp=isoformat_utc(scan.timestamp) or "",
+        created_at=isoformat_utc(scan.created_at) or "",
     )
-

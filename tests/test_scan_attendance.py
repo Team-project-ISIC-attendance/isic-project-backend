@@ -17,6 +17,12 @@ from tests.helpers.mqtt_simulator import (
 from tests.test_auth import create_test_user, get_auth_header
 
 
+def _current_schedule_time() -> datetime:
+    return datetime.now(UTC).astimezone(
+        ZoneInfo(settings.schedule_time_zone)
+    )
+
+
 async def _create_lesson_matching_now(
     client: AsyncClient,
     headers: dict[str, str],
@@ -32,7 +38,7 @@ async def _create_lesson_matching_now(
     and the semester start_date is Monday of the current week so
     week-1 lesson lands on today.
     """
-    now = datetime.now(UTC)
+    now = _current_schedule_time()
     today = now.date()
     # Monday of the current week
     monday = today - timedelta(days=today.weekday())
@@ -125,7 +131,7 @@ async def _create_empty_lesson_matching_now(
     subject_code: str,
 ) -> dict[str, int]:
     """Create semester + subject + schedule entry with an active lesson and no students."""
-    now = datetime.now(UTC)
+    now = _current_schedule_time()
     today = now.date()
     monday = today - timedelta(days=today.weekday())
     day_of_week = today.isoweekday()
@@ -231,7 +237,7 @@ async def test_scan_outside_window(
     )
     headers = await get_auth_header(test_client, "admin@scan2.sk", "pass")
 
-    now = datetime.now(UTC)
+    now = _current_schedule_time()
     today = now.date()
     monday = today - timedelta(days=today.weekday())
     day_of_week = today.isoweekday()

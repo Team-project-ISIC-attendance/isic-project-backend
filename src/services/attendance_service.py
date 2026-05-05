@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -19,6 +19,7 @@ from src.models.schedule_entry import ScheduleEntry
 from src.models.semester import Semester
 from src.models.subject import Subject
 from src.services.schedule_service import compute_week_date_range
+from src.utils.datetime import coerce_utc_datetime, isoformat_utc
 
 _DAY_NAMES_SK = {
     1: "pondelok",
@@ -46,6 +47,10 @@ def _recurrence_label(entry: ScheduleEntry) -> str:
 
 def _same_subject_name(source: Subject, target: Subject) -> bool:
     return source.name.strip().casefold() == target.name.strip().casefold()
+
+
+def _coerce_utc_timestamp(timestamp: datetime) -> datetime:
+    return coerce_utc_datetime(timestamp)
 
 
 def _compute_summary(records: list[AttendanceRecord]) -> dict[str, int]:
@@ -112,7 +117,7 @@ async def get_lesson_attendance(
     for record in sorted_records:
         scan_timestamp: str | None = None
         if record.scan is not None:
-            scan_timestamp = record.scan.timestamp.isoformat()
+            scan_timestamp = isoformat_utc(record.scan.timestamp)
         students.append({
             "attendance_id": record.id,
             "enrollment_id": enrollment_by_isic_id.get(record.isic_id),
@@ -444,7 +449,7 @@ async def try_auto_record(
     Finds active lessons within the scan time window and updates
     attendance records from nepritomny/manual to pritomny/scan.
     """
-    scan_local = scan_timestamp.astimezone(
+    scan_local = _coerce_utc_timestamp(scan_timestamp).astimezone(
         ZoneInfo(settings.schedule_time_zone)
     )
     scan_date = scan_local.date()
@@ -456,7 +461,6 @@ async def try_auto_record(
     )
     enroll_result = await session.execute(enroll_stmt)
     subject_ids = list(enroll_result.scalars().all())
-
     if not subject_ids:
         logger.debug("No enrollments found for isic_id={}", isic_id)
         return []
@@ -474,7 +478,6 @@ async def try_auto_record(
     )
     lesson_result = await session.execute(lesson_stmt)
     lessons = list(lesson_result.scalars().all())
-
     if not lessons:
         logger.debug("No lessons found on {} for enrolled subjects", scan_date)
         return []

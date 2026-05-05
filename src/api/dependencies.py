@@ -1,8 +1,11 @@
-from fastapi import Depends, HTTPException, status
+from typing import cast
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.connection import get_db
+from src.mqtt.client import MQTTClient
 from src.models.user import User
 from src.services.auth_service import decode_access_token, get_user_by_email
 
@@ -46,3 +49,13 @@ async def require_admin(
             detail="Admin access required",
         )
     return user
+
+
+def get_mqtt_client(request: Request) -> MQTTClient:
+    mqtt_client = getattr(request.app.state, "mqtt_client", None)
+    if mqtt_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQTT client is not available",
+        )
+    return cast(MQTTClient, mqtt_client)

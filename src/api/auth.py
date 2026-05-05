@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_user, require_admin
-from src.api.schemas import RegisterRequest, TokenResponse, UserResponse
+from src.api.schemas import (
+    RegisterRequest,
+    TokenResponse,
+    UserISICUpdateRequest,
+    UserResponse,
+)
 from src.database.connection import get_db
 from src.models.user import User, UserRole
 from src.services.auth_service import (
@@ -12,6 +18,7 @@ from src.services.auth_service import (
     create_user,
     get_user_by_email,
     hash_password,
+    update_user_isic_identifier,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -50,6 +57,7 @@ async def me(
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
+        isic_identifier=current_user.isic_identifier,
         first_name=current_user.first_name,
         last_name=current_user.last_name,
         role=current_user.role.value,
@@ -84,17 +92,55 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid role: {data.role}",
         ) from err
-    user = await create_user(
-        session=db,
-        email=data.email,
-        hashed_password=hash_password(data.password),
-        first_name=data.first_name,
-        last_name=data.last_name,
-        role=role,
-    )
+    try:
+        user = await create_user(
+            session=db,
+            email=data.email,
+            hashed_password=hash_password(data.password),
+            isic_identifier=data.isic_identifier,
+            first_name=data.first_name,
+            last_name=data.last_name,
+            role=role,
+        )
+    except IntegrityError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="ISIC identifier already used",
+        ) from err
     return UserResponse(
         id=user.id,
         email=user.email,
+        isic_identifier=user.isic_identifier,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role.value,
+    )
+
+
+@router.patch(
+    "/me/isic",
+    response_model=UserResponse,
+    summary="Update current user's ISIC identifier for device pairing",
+    responses={409: {"description": "ISIC identifier already used"}},
+)
+async def update_my_isic(
+    data: UserISICUpdateRequest,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> UserResponse:
+    try:
+        user = await update_user_isic_identifier(
+            db, current_user, data.isic_identifier
+        )
+    except IntegrityError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="ISIC identifier already used",
+        ) from err
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        isic_identifier=user.isic_identifier,
         first_name=user.first_name,
         last_name=user.last_name,
         role=user.role.value,
