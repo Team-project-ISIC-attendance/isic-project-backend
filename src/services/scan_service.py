@@ -1,11 +1,15 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.isic import ISIC
 from src.models.scan import ISICScan
+
+
+def normalize_isic_identifier(isic_identifier: str) -> str:
+    return isic_identifier.strip().upper()
 
 
 async def get_or_create_isic(
@@ -14,18 +18,23 @@ async def get_or_create_isic(
     first_name: str | None = None,
     last_name: str | None = None,
 ) -> ISIC:
-    stmt = select(ISIC).where(ISIC.isic_identifier == isic_identifier)
+    normalized_identifier = normalize_isic_identifier(isic_identifier)
+    stmt = select(ISIC).where(
+        func.upper(func.trim(ISIC.isic_identifier)) == normalized_identifier
+    )
     result = await session.execute(stmt)
     isic = result.scalar_one_or_none()
 
     if isic is None:
         isic = ISIC(
-            isic_identifier=isic_identifier,
+            isic_identifier=normalized_identifier,
             first_name=first_name,
             last_name=last_name,
         )
         session.add(isic)
         await session.flush()
+    elif isic.isic_identifier != normalized_identifier:
+        isic.isic_identifier = normalized_identifier
 
     return isic
 
@@ -99,9 +108,15 @@ async def get_isic_by_identifier(
     session: AsyncSession,
     isic_identifier: str,
 ) -> ISIC | None:
-    stmt = select(ISIC).where(ISIC.isic_identifier == isic_identifier)
+    normalized_identifier = normalize_isic_identifier(isic_identifier)
+    stmt = select(ISIC).where(
+        func.upper(func.trim(ISIC.isic_identifier)) == normalized_identifier
+    )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    isic = result.scalar_one_or_none()
+    if isic is not None and isic.isic_identifier != normalized_identifier:
+        isic.isic_identifier = normalized_identifier
+    return isic
 
 
 async def update_isic(
@@ -122,4 +137,3 @@ async def update_isic(
     await session.commit()
     await session.refresh(isic)
     return isic
-

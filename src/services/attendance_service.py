@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy import delete, select
@@ -443,8 +444,11 @@ async def try_auto_record(
     Finds active lessons within the scan time window and updates
     attendance records from nepritomny/manual to pritomny/scan.
     """
-    scan_date = scan_timestamp.date()
-    scan_naive = scan_timestamp.replace(tzinfo=None)
+    scan_local = scan_timestamp.astimezone(
+        ZoneInfo(settings.schedule_time_zone)
+    )
+    scan_date = scan_local.date()
+    scan_naive = scan_local.replace(tzinfo=None)
 
     # Find all subjects this ISIC is enrolled in
     enroll_stmt = select(Enrollment.subject_id).where(
