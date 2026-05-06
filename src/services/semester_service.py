@@ -10,6 +10,7 @@ from src.models.schedule_entry import ScheduleEntry
 from src.models.semester import Semester
 from src.models.subject import Subject
 from src.models.week_note import WeekNote
+from src.models.user import User, UserRole
 
 
 async def create_semester(
@@ -18,9 +19,11 @@ async def create_semester(
     start_date: date,
     end_date: date,
     total_weeks: int,
+    owner_id: int | None,
 ) -> Semester:
     semester = Semester(
         name=name,
+        owner_id=owner_id,
         start_date=start_date,
         end_date=end_date,
         total_weeks=total_weeks,
@@ -45,6 +48,16 @@ async def get_all_semesters(session: AsyncSession) -> list[Semester]:
     result = await session.execute(
         select(Semester).order_by(Semester.id)
     )
+    return list(result.scalars().all())
+
+
+async def get_semesters_for_user(
+    session: AsyncSession, user: User
+) -> list[Semester]:
+    stmt = select(Semester)
+    if user.role == UserRole.teacher:
+        stmt = stmt.where(Semester.owner_id == user.id)
+    result = await session.execute(stmt.order_by(Semester.id))
     return list(result.scalars().all())
 
 

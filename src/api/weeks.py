@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import ensure_semester_access, get_current_user
 from src.api.schemas import WeekNoteUpdate, WeekResponse
 from src.database.connection import get_db
 from src.models.user import User
@@ -23,7 +23,7 @@ router = APIRouter(
 )
 async def get_weeks(
     semester_id: int,
-    _user: User = Depends(get_current_user),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> list[WeekResponse]:
     semester = await get_semester_by_id(db, semester_id)
@@ -32,6 +32,7 @@ async def get_weeks(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Semester not found",
         )
+    ensure_semester_access(current_user, semester)
     result = await db.execute(
         select(WeekNote)
         .where(WeekNote.semester_id == semester_id)
@@ -60,9 +61,16 @@ async def update_week_note(
     semester_id: int,
     week_number: int,
     data: WeekNoteUpdate,
-    _user: User = Depends(get_current_user),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> WeekResponse:
+    semester = await get_semester_by_id(db, semester_id)
+    if semester is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Semester not found",
+        )
+    ensure_semester_access(current_user, semester)
     result = await db.execute(
         select(WeekNote).where(
             WeekNote.semester_id == semester_id,
@@ -79,8 +87,6 @@ async def update_week_note(
     await db.commit()
     await db.refresh(week_note)
 
-    semester = await get_semester_by_id(db, semester_id)
-    assert semester is not None
     return WeekResponse(
         week_number=week_note.week_number,
         note=week_note.note,

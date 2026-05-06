@@ -220,11 +220,10 @@ async def test_overview_teacher_isolation(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """Teacher A creates subject → Teacher B cannot access overview → 403."""
-    # Admin creates semester (required by require_admin)
     await create_test_user(
-        db_session, "admin@ov4.sk", "pass", role=UserRole.admin
+        db_session, "teacherA@ov4.sk", "pass", role=UserRole.teacher
     )
-    admin_headers = await get_auth_header(test_client, "admin@ov4.sk", "pass")
+    headers_a = await get_auth_header(test_client, "teacherA@ov4.sk", "pass")
 
     sem_resp = await test_client.post(
         "/semesters",
@@ -234,15 +233,9 @@ async def test_overview_teacher_isolation(
             "end_date": "2026-05-16",
             "total_weeks": 13,
         },
-        headers=admin_headers,
+        headers=headers_a,
     )
     semester_id = sem_resp.json()["id"]
-
-    # Teacher A creates subject + entry
-    await create_test_user(
-        db_session, "teacherA@ov4.sk", "pass", role=UserRole.teacher
-    )
-    headers_a = await get_auth_header(test_client, "teacherA@ov4.sk", "pass")
 
     subj_resp = await test_client.post(
         "/subjects",

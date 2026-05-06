@@ -14,6 +14,8 @@ class HardwareDeviceSummaryResponse(BaseModel):
     location_id: str | None
     firmware: str | None
     health_state: str | None
+    is_online: bool
+    connectivity_state: str
     last_seen_at: str | None
     last_attendance_at: str | None
     last_health_at: str | None

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -20,6 +20,7 @@ from src.models.semester import Semester
 from src.models.subject import Subject
 from src.services.schedule_service import compute_week_date_range
 from src.utils.datetime import coerce_utc_datetime, isoformat_utc
+from src.utils.semester import get_semester_week_monday
 
 _DAY_NAMES_SK = {
     1: "pondelok",
@@ -47,6 +48,12 @@ def _recurrence_label(entry: ScheduleEntry) -> str:
 
 def _same_subject_name(source: Subject, target: Subject) -> bool:
     return source.name.strip().casefold() == target.name.strip().casefold()
+
+
+def _target_status_for_move(status: AttendanceStatus) -> AttendanceStatus:
+    if status in {AttendanceStatus.pritomny, AttendanceStatus.nahrada}:
+        return AttendanceStatus.nahrada
+    return AttendanceStatus.nepritomny
 
 
 def _coerce_utc_timestamp(timestamp: datetime) -> datetime:
@@ -110,7 +117,11 @@ async def get_lesson_attendance(
 
     sorted_records = sorted(
         lesson.attendance_records,
-        key=lambda r: (r.isic.last_name or "", r.isic.first_name or ""),
+        key=lambda r: (
+            r.isic.student_identifier or "",
+            r.isic.last_name or "",
+            r.isic.first_name or "",
+        ),
     )
 
     students = []
@@ -121,9 +132,13 @@ async def get_lesson_attendance(
         students.append({
             "attendance_id": record.id,
             "enrollment_id": enrollment_by_isic_id.get(record.isic_id),
+            "student_identifier": record.isic.student_identifier,
             "isic_identifier": record.isic.isic_identifier,
+            "full_name": record.isic.full_name,
             "first_name": record.isic.first_name,
             "last_name": record.isic.last_name,
+            "study_identification": record.isic.study_identification,
+            "email_is": record.isic.email_is,
             "status": record.status.value,
             "marked_by": record.marked_by.value,
             "scan_timestamp": scan_timestamp,
@@ -216,6 +231,8 @@ async def move_attendance(
     if not _same_subject_name(source_subject, target_subject):
         return "Target lesson belongs to a different subject/event"
 
+    target_status = _target_status_for_move(record.status)
+
     target_record_stmt = select(AttendanceRecord).where(
         AttendanceRecord.lesson_id == target_lesson_id,
         AttendanceRecord.isic_id == record.isic_id,
@@ -300,12 +317,12 @@ async def move_attendance(
         target_record = AttendanceRecord(
             lesson_id=target_lesson_id,
             isic_id=record.isic_id,
-            status=AttendanceStatus.nahrada,
+            status=target_status,
             marked_by=MarkedBy.manual,
         )
         session.add(target_record)
     else:
-        target_record.status = AttendanceStatus.nahrada
+        target_record.status = target_status
         target_record.marked_by = MarkedBy.manual
         target_record.scan_id = None
 
@@ -316,7 +333,7 @@ async def move_attendance(
 
 def _is_current_week(semester_start: date, week_number: int, today: date) -> bool:
     """Check if a week is the current week based on semester start date."""
-    monday = semester_start + timedelta(days=(week_number - 1) * 7)
+    monday = get_semester_week_monday(semester_start, week_number)
     sunday = monday + timedelta(days=6)
     return monday <= today <= sunday
 
@@ -383,7 +400,11 @@ async def get_schedule_entry_overview(
     enroll_result = await session.execute(enroll_stmt)
     enrollments = list(enroll_result.scalars().all())
     enrollments.sort(
-        key=lambda e: (e.isic.last_name or "", e.isic.first_name or "")
+        key=lambda e: (
+            e.isic.student_identifier or "",
+            e.isic.last_name or "",
+            e.isic.first_name or "",
+        )
     )
 
     # Build attendance lookup: (lesson_id, isic_id) → AttendanceRecord
@@ -413,9 +434,14 @@ async def get_schedule_entry_overview(
                     "status": record.status.value if record else None,
                 })
         students.append({
+            "enrollment_id": enrollment.id,
+            "student_identifier": isic.student_identifier,
             "isic_identifier": isic.isic_identifier,
+            "full_name": isic.full_name,
             "first_name": isic.first_name,
             "last_name": isic.last_name,
+            "study_identification": isic.study_identification,
+            "email_is": isic.email_is,
             "weeks": student_weeks,
         })
 

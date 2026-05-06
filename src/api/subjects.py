@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import (
+    ensure_subject_access,
+    get_current_user,
+    require_teacher_or_admin,
+)
 from src.api.schemas import (
     OverviewResponse,
     SubjectCreate,
@@ -58,6 +62,7 @@ async def create_subject_endpoint(
     current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> SubjectResponse:
+    require_teacher_or_admin(current_user)
     try:
         subject = await create_subject(
             db,
@@ -97,11 +102,7 @@ async def update_subject_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subject not found",
         )
-    if current_user.role != UserRole.admin and subject.teacher_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not your subject",
-        )
+    ensure_subject_access(current_user, subject)
     updated = await update_subject(
         db, subject_id, name=data.name, code=data.code, color=data.color
     )
@@ -129,11 +130,7 @@ async def delete_subject_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subject not found",
         )
-    if current_user.role != UserRole.admin and subject.teacher_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not your subject",
-        )
+    ensure_subject_access(current_user, subject)
     await delete_subject(db, subject_id)
     return {"detail": "Subject deleted"}
 

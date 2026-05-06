@@ -53,9 +53,17 @@ class ISICUpdateRequest(BaseModel):
 
 class ISICResponse(BaseModel):
     id: int = Field(..., description="ISIC ID")
+    student_identifier: str | None = Field(
+        None, description="Student identifier used for UI display"
+    )
     isic_identifier: str = Field(..., description="ISIC identifier")
+    full_name: str | None = Field(None, description="Full student name")
     first_name: str | None = Field(None, description="First name")
     last_name: str | None = Field(None, description="Last name")
+    study_identification: str | None = Field(
+        None, description="Study identification"
+    )
+    email_is: str | None = Field(None, description="Institutional email")
     created_at: str = Field(..., description="ISIC creation timestamp in ISO format")
 
 
@@ -86,3 +94,11 @@ class UserISICUpdateRequest(BaseModel):
     isic_identifier: str | None = Field(
         None, description="Teacher ISIC identifier used for hardware pairing"
     )
+
+
+class UserUpdateRequest(BaseModel):
+    email: str | None = None
+    password: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    isic_identifier: str | None = None

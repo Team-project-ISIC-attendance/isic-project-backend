@@ -23,14 +23,35 @@ async def enroll_student(
     isic_identifier: str,
     first_name: str,
     last_name: str,
+    student_identifier: str | None = None,
+    full_name: str | None = None,
+    study_identification: str | None = None,
+    email_is: str | None = None,
 ) -> Enrollment:
     await _ensure_subject_exists(session, subject_id)
-    isic = await get_or_create_isic(session, isic_identifier)
+    isic = await get_or_create_isic(
+        session,
+        isic_identifier,
+        first_name=first_name or None,
+        last_name=last_name or None,
+        student_identifier=student_identifier,
+        full_name=full_name,
+        study_identification=study_identification,
+        email_is=email_is,
+    )
 
     if isic.first_name is None and first_name:
         isic.first_name = first_name
     if isic.last_name is None and last_name:
         isic.last_name = last_name
+    if isic.full_name is None and full_name:
+        isic.full_name = full_name
+    if isic.student_identifier is None and student_identifier:
+        isic.student_identifier = student_identifier
+    if isic.study_identification is None and study_identification:
+        isic.study_identification = study_identification
+    if isic.email_is is None and email_is:
+        isic.email_is = email_is
 
     enrollment = Enrollment(
         subject_id=subject_id,
@@ -134,6 +155,10 @@ async def import_students(
                 isic_identifier=row["isic_identifier"],
                 first_name=row.get("first_name", ""),
                 last_name=row.get("last_name", ""),
+                student_identifier=row.get("student_identifier"),
+                full_name=row.get("full_name"),
+                study_identification=row.get("study_identification"),
+                email_is=row.get("email_is"),
             )
             imported += 1
         except IntegrityError:

@@ -13,6 +13,7 @@ from src.models.device_pairing_session import (
 )
 from src.models.hardware_device import HardwareDevice
 from src.models.user import User, UserRole
+from src.config import settings
 from src.services.scan_service import normalize_isic_identifier
 from src.utils.datetime import coerce_utc_datetime
 
@@ -52,7 +53,7 @@ def parse_hardware_topic(topic: str) -> ParsedHardwareTopic | None:
     if len(parts) < 3:
         return None
 
-    if parts[-1] in {"attendance", "health", "metrics", "config"}:
+    if parts[-1] in {"attendance", "health", "metrics", "config", "status"}:
         device_index = -2
         kind = parts[-1]
         section = None
@@ -104,6 +105,19 @@ def update_device_last_seen(
 ) -> None:
     seen_at = _coerce_utc(timestamp)
     device.last_seen_at = seen_at
+
+
+def is_device_online(
+    device: HardwareDevice,
+    current_time: datetime | None = None,
+) -> bool:
+    if device.last_seen_at is None:
+        return False
+
+    now = _coerce_utc(current_time)
+    last_seen = _coerce_utc(device.last_seen_at)
+    timeout = timedelta(seconds=settings.hardware_online_timeout_seconds)
+    return now - last_seen <= timeout
 
 
 def record_device_attendance(
@@ -160,6 +174,22 @@ def store_health_payload(
         else device.firmware
     )
     device.last_health_at = timestamp
+    device.last_seen_at = timestamp
+
+
+def store_status_payload(
+    device: HardwareDevice,
+    payload: str,
+    received_at: datetime | None = None,
+) -> None:
+    status_payload = _json_object(payload)
+    timestamp = _coerce_utc(received_at)
+
+    device.firmware = (
+        status_payload["firmware"]
+        if isinstance(status_payload.get("firmware"), str)
+        else device.firmware
+    )
     device.last_seen_at = timestamp
 
 
@@ -368,49 +398,69 @@ async def claim_device_from_scan(
     device: HardwareDevice,
     scanned_identifier: str,
     scanned_at: datetime,
-) -> DevicePairingSession | None:
-    await expire_stale_pairing_sessions(session, scanned_at)
+) -> User | None:
     normalized_identifier = normalize_isic_identifier(scanned_identifier)
     result = await session.execute(
-        select(DevicePairingSession)
-        .join(DevicePairingSession.teacher)
-        .where(
-            DevicePairingSession.hardware_device_id == device.id,
-            DevicePairingSession.status == DevicePairingStatus.pending,
+        select(User).where(
+            User.role == UserRole.teacher,
             User.isic_identifier == normalized_identifier,
         )
-        .order_by(DevicePairingSession.started_at.desc())
-        .options(selectinload(DevicePairingSession.teacher))
     )
-    pairing_session = result.scalars().first()
-    if pairing_session is None:
+    teacher = result.scalar_one_or_none()
+    if teacher is None:
         return None
 
-    if device.teacher_id is not None and device.teacher_id != pairing_session.teacher_id:
-        pairing_session.status = DevicePairingStatus.cancelled
-        await session.commit()
-        await session.refresh(pairing_session)
-        return pairing_session
+    if device.teacher_id == teacher.id:
+        return teacher
 
     completed_at = _coerce_utc(scanned_at)
-    device.teacher_id = pairing_session.teacher_id
+    device.teacher_id = teacher.id
     device.claimed_at = completed_at
-    pairing_session.status = DevicePairingStatus.completed
-    pairing_session.completed_at = completed_at
 
-    other_sessions_result = await session.execute(
+    pending_sessions_result = await session.execute(
         select(DevicePairingSession).where(
             DevicePairingSession.hardware_device_id == device.id,
             DevicePairingSession.status == DevicePairingStatus.pending,
-            DevicePairingSession.id != pairing_session.id,
         )
     )
-    for other_session in other_sessions_result.scalars().all():
-        other_session.status = DevicePairingStatus.cancelled
+    for pairing_session in pending_sessions_result.scalars().all():
+        if pairing_session.teacher_id == teacher.id:
+            pairing_session.status = DevicePairingStatus.completed
+            pairing_session.completed_at = completed_at
+        else:
+            pairing_session.status = DevicePairingStatus.cancelled
+
+    return teacher
+
+
+async def claim_device_for_teacher(
+    session: AsyncSession,
+    device: HardwareDevice,
+    teacher: User,
+    claimed_at: datetime | None = None,
+) -> HardwareDevice:
+    if teacher.role != UserRole.teacher:
+        raise ValueError("Only teachers can claim devices")
+    timestamp = _coerce_utc(claimed_at)
+    device.teacher_id = teacher.id
+    device.claimed_at = timestamp
+
+    pending_sessions_result = await session.execute(
+        select(DevicePairingSession).where(
+            DevicePairingSession.hardware_device_id == device.id,
+            DevicePairingSession.status == DevicePairingStatus.pending,
+        )
+    )
+    for pairing_session in pending_sessions_result.scalars().all():
+        if pairing_session.teacher_id == teacher.id:
+            pairing_session.status = DevicePairingStatus.completed
+            pairing_session.completed_at = timestamp
+        else:
+            pairing_session.status = DevicePairingStatus.cancelled
 
     await session.commit()
-    await session.refresh(pairing_session)
-    return pairing_session
+    await session.refresh(device)
+    return device
 
 
 def build_device_topic(

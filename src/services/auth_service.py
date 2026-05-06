@@ -122,3 +122,52 @@ async def update_user_isic_identifier(
     await session.commit()
     await session.refresh(user)
     return user
+
+
+async def list_users_by_role(
+    session: AsyncSession, role: UserRole
+) -> list[User]:
+    result = await session.execute(
+        select(User).where(User.role == role).order_by(User.last_name, User.first_name)
+    )
+    return list(result.scalars().all())
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
+    result = await session.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def update_user(
+    session: AsyncSession,
+    user: User,
+    *,
+    email: str | None = None,
+    password: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    isic_identifier: str | None = None,
+    isic_provided: bool = False,
+) -> User:
+    if email is not None:
+        user.email = email
+    if password is not None and password != "":
+        user.hashed_password = hash_password(password)
+    if first_name is not None:
+        user.first_name = first_name
+    if last_name is not None:
+        user.last_name = last_name
+    if isic_provided:
+        user.isic_identifier = (
+            normalize_isic_identifier(isic_identifier)
+            if isic_identifier
+            else None
+        )
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def delete_user(session: AsyncSession, user: User) -> None:
+    await session.delete(user)
+    await session.commit()

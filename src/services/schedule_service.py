@@ -11,6 +11,10 @@ from src.models.schedule_entry import LessonType, ScheduleEntry
 from src.models.semester import Semester
 from src.models.subject import Subject
 from src.models.user import User, UserRole
+from src.utils.semester import (
+    get_semester_week_monday,
+    get_semester_weekday_date,
+)
 
 
 def _parse_time(value: str) -> time:
@@ -40,9 +44,13 @@ def _iter_lesson_dates(
         if recurrence_interval > 1 and (week - 1) % recurrence_interval != 0:
             continue
 
-        lesson_date = semester.start_date + timedelta(
-            days=(week - 1) * 7 + (day_of_week - 1)
+        lesson_date = get_semester_weekday_date(
+            semester.start_date, week, day_of_week
         )
+        if lesson_date < semester.start_date:
+            continue
+        if lesson_date > semester.end_date:
+            break
         if end_date is not None and lesson_date > end_date:
             break
         lesson_dates[week] = lesson_date
@@ -297,6 +305,6 @@ async def delete_schedule_entry(
 
 
 def compute_week_date_range(start_date: date, week_number: int) -> str:
-    monday = start_date + timedelta(days=(week_number - 1) * 7)
+    monday = get_semester_week_monday(start_date, week_number)
     friday = monday + timedelta(days=4)
     return f"{monday.day}.{monday.month}. - {friday.day}.{friday.month}."

@@ -18,6 +18,11 @@ async def get_or_create_isic(
     isic_identifier: str,
     first_name: str | None = None,
     last_name: str | None = None,
+    *,
+    student_identifier: str | None = None,
+    full_name: str | None = None,
+    study_identification: str | None = None,
+    email_is: str | None = None,
 ) -> ISIC:
     normalized_identifier = normalize_isic_identifier(isic_identifier)
     stmt = select(ISIC).where(
@@ -28,14 +33,31 @@ async def get_or_create_isic(
 
     if isic is None:
         isic = ISIC(
+            student_identifier=student_identifier,
             isic_identifier=normalized_identifier,
+            full_name=full_name,
             first_name=first_name,
             last_name=last_name,
+            study_identification=study_identification,
+            email_is=email_is,
         )
         session.add(isic)
         await session.flush()
     elif isic.isic_identifier != normalized_identifier:
         isic.isic_identifier = normalized_identifier
+
+    if student_identifier and not isic.student_identifier:
+        isic.student_identifier = student_identifier
+    if full_name and not isic.full_name:
+        isic.full_name = full_name
+    if first_name and not isic.first_name:
+        isic.first_name = first_name
+    if last_name and not isic.last_name:
+        isic.last_name = last_name
+    if study_identification and not isic.study_identification:
+        isic.study_identification = study_identification
+    if email_is and not isic.email_is:
+        isic.email_is = email_is
 
     return isic
 

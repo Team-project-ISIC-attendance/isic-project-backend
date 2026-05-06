@@ -213,7 +213,7 @@ async def test_hardware_control_routes_publish_documented_topics(
 
 
 @pytest.mark.asyncio
-async def test_teacher_can_claim_multiple_devices_via_pairing_scan_flow(
+async def test_teacher_can_claim_multiple_devices_via_scan_without_pairing_session(
     mqtt_client: MQTTClient,
     mqtt_host: str,
     mqtt_port: int,
@@ -267,13 +267,6 @@ async def test_teacher_can_claim_multiple_devices_via_pairing_scan_flow(
     }
 
     for device_id in (first_device_id, second_device_id):
-        pairing_response = await test_client.post(
-            f"/hardware/devices/{device_id}/pairing/start",
-            headers=headers,
-        )
-        assert pairing_response.status_code == 201
-        assert pairing_response.json()["status"] == "pending"
-
         await publish_attendance_message(
             mqtt_host,
             mqtt_port,
@@ -282,13 +275,6 @@ async def test_teacher_can_claim_multiple_devices_via_pairing_scan_flow(
             device_id=device_id,
         )
         await wait_for_message_processing()
-
-        pairing_status_response = await test_client.get(
-            f"/hardware/devices/{device_id}/pairing",
-            headers=headers,
-        )
-        assert pairing_status_response.status_code == 200
-        assert pairing_status_response.json()["status"] == "completed"
 
     my_devices_response = await test_client.get(
         "/hardware/devices",
@@ -329,3 +315,140 @@ async def test_teacher_can_claim_multiple_devices_via_pairing_scan_flow(
         device["device_id"] for device in returned_unclaimed_response.json()
     }
     assert first_device_id in returned_unclaimed_ids
+
+
+@pytest.mark.asyncio
+async def test_teacher_can_claim_device_via_web_without_scan(
+    test_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    teacher = await create_test_user(
+        db_session,
+        "teacher@hardware-web-claim.sk",
+        "pass",
+        role=UserRole.teacher,
+        isic_identifier="WEB-CLAIM-ISIC",
+    )
+    headers = await get_auth_header(
+        test_client, "teacher@hardware-web-claim.sk", "pass"
+    )
+
+    device = HardwareDevice(
+        device_id="HW-WEB-CLAIM-01",
+        base_topic="prod/readers",
+    )
+    db_session.add(device)
+    await db_session.commit()
+
+    claim_response = await test_client.post(
+        "/hardware/devices/HW-WEB-CLAIM-01/claim",
+        headers=headers,
+    )
+    assert claim_response.status_code == 200
+    assert claim_response.json()["teacher_id"] == teacher.id
+    assert claim_response.json()["is_claimed"] is True
+
+    my_devices_response = await test_client.get(
+        "/hardware/devices",
+        headers=headers,
+    )
+    assert my_devices_response.status_code == 200
+    assert [device["device_id"] for device in my_devices_response.json()] == [
+        "HW-WEB-CLAIM-01"
+    ]
+
+    unclaimed_response = await test_client.get(
+        "/hardware/devices/unclaimed",
+        headers=headers,
+    )
+    assert unclaimed_response.status_code == 200
+    assert all(
+        item["device_id"] != "HW-WEB-CLAIM-01"
+        for item in unclaimed_response.json()
+    )
+
+
+@pytest.mark.asyncio
+async def test_teacher_scan_overrides_previous_claim_without_pairing_session(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    test_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    first_teacher = await create_test_user(
+        db_session,
+        "teacher-one@hardware-override.sk",
+        "pass",
+        role=UserRole.teacher,
+        isic_identifier="TEACHER-ONE-CARD",
+        first_name="First",
+        last_name="Teacher",
+    )
+    second_teacher = await create_test_user(
+        db_session,
+        "teacher-two@hardware-override.sk",
+        "pass",
+        role=UserRole.teacher,
+        isic_identifier="TEACHER-TWO-CARD",
+        first_name="Second",
+        last_name="Teacher",
+    )
+    first_headers = await get_auth_header(
+        test_client, "teacher-one@hardware-override.sk", "pass"
+    )
+    second_headers = await get_auth_header(
+        test_client, "teacher-two@hardware-override.sk", "pass"
+    )
+
+    device_id = "HW-OVERRIDE-01"
+    base_topic = "prod/readers"
+    app.state.mqtt_client = mqtt_client
+
+    await publish_health_message(
+        mqtt_host,
+        mqtt_port,
+        base_topic=base_topic,
+        device_id=device_id,
+        data={"firmware": "2.1.0", "state": "healthy"},
+    )
+    await wait_for_message_processing()
+
+    initial_claim_response = await test_client.post(
+        f"/hardware/devices/{device_id}/claim",
+        headers=first_headers,
+    )
+    assert initial_claim_response.status_code == 200
+    assert initial_claim_response.json()["teacher_id"] == first_teacher.id
+
+    await publish_attendance_message(
+        mqtt_host,
+        mqtt_port,
+        uid=second_teacher.isic_identifier or "",
+        base_topic=base_topic,
+        device_id=device_id,
+    )
+    await wait_for_message_processing()
+
+    second_devices_response = await test_client.get(
+        "/hardware/devices",
+        headers=second_headers,
+    )
+    assert second_devices_response.status_code == 200
+    assert [device["device_id"] for device in second_devices_response.json()] == [
+        device_id
+    ]
+
+    first_devices_response = await test_client.get(
+        "/hardware/devices",
+        headers=first_headers,
+    )
+    assert first_devices_response.status_code == 200
+    assert first_devices_response.json() == []
+
+    device_response = await test_client.get(
+        f"/hardware/devices/{device_id}",
+        headers=second_headers,
+    )
+    assert device_response.status_code == 200
+    assert device_response.json()["teacher_id"] == second_teacher.id

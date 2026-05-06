@@ -57,9 +57,13 @@ async def update_isic_info(
         raise HTTPException(status_code=404, detail="ISIC not found")
     return ISICResponse(
         id=updated_isic.id,
+        student_identifier=updated_isic.student_identifier,
         isic_identifier=updated_isic.isic_identifier,
+        full_name=updated_isic.full_name,
         first_name=updated_isic.first_name,
         last_name=updated_isic.last_name,
+        study_identification=updated_isic.study_identification,
+        email_is=updated_isic.email_is,
         created_at=isoformat_utc(updated_isic.created_at) or "",
     )
 

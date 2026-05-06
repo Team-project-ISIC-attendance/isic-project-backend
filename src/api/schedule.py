@@ -1,14 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import (
+    ensure_semester_access,
+    ensure_subject_access,
+    ensure_subject_matches_semester,
+    get_current_user,
+    require_teacher_or_admin,
+)
 from src.api.schemas import (
     ScheduleEntryCreate,
     ScheduleEntryResponse,
     ScheduleEntryUpdate,
 )
 from src.database.connection import get_db
+from src.models.schedule_entry import ScheduleEntry
+from src.models.subject import Subject
 from src.models.user import User
 from src.services.schedule_service import (
     create_schedule_entry,
@@ -41,6 +51,32 @@ def _entry_response(entry: "ScheduleEntry") -> ScheduleEntryResponse:  # type: i
     )
 
 
+async def _get_entry_or_404(
+    db: AsyncSession,
+    semester_id: int,
+    entry_id: int,
+) -> ScheduleEntry:
+    stmt = (
+        select(ScheduleEntry)
+        .where(
+            ScheduleEntry.id == entry_id,
+            ScheduleEntry.semester_id == semester_id,
+        )
+        .options(
+            selectinload(ScheduleEntry.subject),
+            selectinload(ScheduleEntry.semester),
+        )
+    )
+    result = await db.execute(stmt)
+    entry = result.scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Schedule entry not found",
+        )
+    return entry
+
+
 @router.get(
     "",
     response_model=list[ScheduleEntryResponse],
@@ -58,6 +94,7 @@ async def get_schedule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Semester not found",
         )
+    ensure_semester_access(current_user, semester)
     entries = await get_schedule_for_semester(db, semester_id, current_user)
     return [_entry_response(e) for e in entries]
 
@@ -72,9 +109,25 @@ async def get_schedule(
 async def create_schedule(
     semester_id: int,
     data: ScheduleEntryCreate,
-    _user: User = Depends(get_current_user),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ScheduleEntryResponse:
+    require_teacher_or_admin(current_user)
+    semester = await get_semester_by_id(db, semester_id)
+    if semester is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Semester not found",
+        )
+    ensure_semester_access(current_user, semester)
+    subject = await db.get(Subject, data.subject_id)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Subject {data.subject_id} not found",
+        )
+    ensure_subject_access(current_user, subject)
+    ensure_subject_matches_semester(subject, semester)
     try:
         entry = await create_schedule_entry(
             db,
@@ -111,9 +164,13 @@ async def update_schedule(
     semester_id: int,
     entry_id: int,
     data: ScheduleEntryUpdate,
-    _user: User = Depends(get_current_user),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ScheduleEntryResponse:
+    require_teacher_or_admin(current_user)
+    entry = await _get_entry_or_404(db, semester_id, entry_id)
+    ensure_semester_access(current_user, entry.semester)
+    ensure_subject_access(current_user, entry.subject)
     try:
         entry = await update_schedule_entry(
             db,
@@ -159,13 +216,13 @@ async def update_schedule(
 async def delete_schedule(
     semester_id: int,
     entry_id: int,
-    _user: User = Depends(get_current_user),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> dict[str, str]:
+    require_teacher_or_admin(current_user)
+    entry = await _get_entry_or_404(db, semester_id, entry_id)
+    ensure_semester_access(current_user, entry.semester)
+    ensure_subject_access(current_user, entry.subject)
     deleted = await delete_schedule_entry(db, semester_id, entry_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Schedule entry not found",
-        )
+    assert deleted
     return {"detail": "Schedule entry deleted"}

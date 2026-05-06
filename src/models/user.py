@@ -36,6 +36,9 @@ class User(Base):
     subjects: Mapped[list["Subject"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Subject", back_populates="teacher"
     )
+    owned_semesters: Mapped[list["Semester"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "Semester", back_populates="owner"
+    )
     hardware_devices: Mapped[list["HardwareDevice"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "HardwareDevice", back_populates="teacher"
     )

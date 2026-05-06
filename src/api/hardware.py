@@ -21,8 +21,10 @@ from src.services.hardware_service import (
     CONFIG_SECTION_KEYS,
     build_device_topic,
     can_access_device,
+    claim_device_for_teacher,
     get_hardware_device,
     get_pairing_session_for_teacher,
+    is_device_online,
     list_hardware_devices,
     list_hardware_devices_for_user,
     list_unclaimed_hardware_devices,
@@ -43,6 +45,7 @@ def _iso_or_none(value: object) -> str | None:
 def _summary_response(
     device: HardwareDevice,
 ) -> HardwareDeviceSummaryResponse:
+    online = is_device_online(device)
     return HardwareDeviceSummaryResponse(
         id=device.id,
         device_id=device.device_id,
@@ -58,6 +61,8 @@ def _summary_response(
         location_id=device.location_id,
         firmware=device.firmware,
         health_state=device.health_state,
+        is_online=online,
+        connectivity_state="online" if online else "offline",
         last_seen_at=_iso_or_none(device.last_seen_at),
         last_attendance_at=_iso_or_none(device.last_attendance_at),
         last_health_at=_iso_or_none(device.last_health_at),
@@ -221,6 +226,25 @@ async def get_device_config(
         received_at=device.last_config_at,
         payload=device.config_payload,
     )
+
+
+@router.post(
+    "/{device_id}/status/request",
+    response_model=HardwareCommandResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request an immediate status publish from the board",
+)
+async def request_device_status(
+    device_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    mqtt_client: MQTTClient = Depends(get_mqtt_client),  # noqa: B008
+) -> HardwareCommandResponse:
+    device = await _require_device(db, device_id)
+    _ensure_device_access(current_user, device)
+    topic = build_device_topic(device, "status", "request")
+    await mqtt_client.publish(topic, b"")
+    return HardwareCommandResponse(detail="Status request published", topic=topic)
 
 
 @router.post(
@@ -396,6 +420,26 @@ async def get_pairing(
     if pairing_session is None:
         return None
     return _pairing_response(pairing_session)
+
+
+@router.post(
+    "/{device_id}/claim",
+    response_model=HardwareDeviceDetailResponse,
+    summary="Claim a device for the current teacher without scanning",
+)
+async def claim_device(
+    device_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> HardwareDeviceDetailResponse:
+    if current_user.role != UserRole.teacher:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can claim devices",
+        )
+    device = await _require_device(db, device_id)
+    updated = await claim_device_for_teacher(db, device, current_user)
+    return _detail_response(updated)
 
 
 @router.delete(

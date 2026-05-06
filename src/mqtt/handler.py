@@ -14,6 +14,7 @@ from src.services.hardware_service import (
     store_config_payload,
     store_health_payload,
     store_metrics_payload,
+    store_status_payload,
 )
 from src.services.attendance_service import try_auto_record
 from src.services.scan_service import create_scan, get_or_create_isic
@@ -48,6 +49,9 @@ async def handle_mqtt_message(
             )
         elif parsed_topic.kind == "health":
             _handle_health(device, message_str)
+            await session.commit()
+        elif parsed_topic.kind == "status":
+            _handle_status(device, message_str)
             await session.commit()
         elif parsed_topic.kind == "metrics":
             _handle_metrics(device, message_str)
@@ -155,17 +159,17 @@ async def _handle_attendance_batch(
             scan_id=scan.id,
             scan_timestamp=scan.timestamp,
         )
-        pairing_session = await claim_device_from_scan(
+        claimed_teacher = await claim_device_from_scan(
             session=session,
             device=device,
             scanned_identifier=str(identifier),
             scanned_at=scan.timestamp,
         )
-        if pairing_session is not None:
+        if claimed_teacher is not None:
             logger.info(
-                "Claimed device {} for teacher {} via scan pairing",
+                "Auto-claimed device {} for teacher {} via scan",
                 device.device_id,
-                pairing_session.teacher_id,
+                claimed_teacher.id,
             )
         if updated:
             await session.commit()
@@ -188,6 +192,14 @@ def _handle_health(
         device.device_id,
         device.health_payload,
     )
+
+
+def _handle_status(
+    device: "HardwareDevice",  # type: ignore[name-defined]  # noqa: F821
+    message_str: str,
+) -> None:
+    store_status_payload(device, message_str)
+    logger.info("Status heartbeat from device {}", device.device_id)
 
 
 def _handle_metrics(

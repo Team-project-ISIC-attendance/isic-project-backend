@@ -18,6 +18,7 @@ from src.api.schemas.base import (
     TokenResponse,
     UserISICUpdateRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 from src.api.schemas.enrollment import (
     EnrollmentResponse,
@@ -98,6 +99,7 @@ __all__ = [
     "PairingSessionResponse",
     "UserISICUpdateRequest",
     "UserResponse",
+    "UserUpdateRequest",
     "WeekLessonAttendanceSummary",
     "WeekLessonResponse",
     "WeekNoteUpdate",

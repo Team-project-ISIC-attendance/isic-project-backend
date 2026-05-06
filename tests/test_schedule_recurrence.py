@@ -15,6 +15,7 @@ async def _setup_semester_and_subject(
     db_session: AsyncSession,
     email: str = "admin@rec.sk",
     start_date: str = "2026-02-16",
+    end_date: str = "2026-05-16",
     total_weeks: int = 13,
 ) -> tuple[dict[str, str], int, int]:
     """Create admin user, semester, and subject. Return (headers, semester_id, subject_id)."""
@@ -29,7 +30,7 @@ async def _setup_semester_and_subject(
         json={
             "name": "Rec Sem",
             "start_date": start_date,
-            "end_date": "2026-05-16",
+            "end_date": end_date,
             "total_weeks": total_weeks,
         },
         headers=headers,
@@ -181,6 +182,45 @@ async def test_default_recurrence_creates_13_lessons(
     )
     lessons = result.scalars().all()
     assert len(lessons) == 13
+
+
+@pytest.mark.asyncio
+async def test_partial_first_week_skips_lessons_before_semester_start(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    headers, semester_id, subject_id = await _setup_semester_and_subject(
+        test_client,
+        db_session,
+        email="admin@partial-week.sk",
+        start_date="2026-02-17",
+        end_date="2026-02-27",
+        total_weeks=2,
+    )
+
+    resp = await test_client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": 1,
+            "start_time": "09:00",
+            "end_time": "10:40",
+            "room": "PX1",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    entry_id = resp.json()["id"]
+
+    result = await db_session.execute(
+        select(Lesson)
+        .where(Lesson.schedule_entry_id == entry_id)
+        .order_by(Lesson.week_number)
+    )
+    lessons = result.scalars().all()
+
+    assert [lesson.week_number for lesson in lessons] == [2]
+    assert [lesson.date for lesson in lessons] == [date(2026, 2, 23)]
 
 
 @pytest.mark.asyncio
