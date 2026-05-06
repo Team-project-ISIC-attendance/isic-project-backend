@@ -16,13 +16,23 @@ from src.api.schemas.base import (
     ScanQueryParams,
     ScanResponse,
     TokenResponse,
+    UserISICUpdateRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 from src.api.schemas.enrollment import (
     EnrollmentResponse,
     EnrollStudentRequest,
     ImportError_,
     ImportResult,
+)
+from src.api.schemas.hardware import (
+    ConfigRequestPayload,
+    HardwareCommandResponse,
+    HardwareDeviceDetailResponse,
+    HardwareDeviceSummaryResponse,
+    HardwareSnapshotResponse,
+    PairingSessionResponse,
 )
 from src.api.schemas.lesson import (
     LessonResponse,
@@ -57,7 +67,12 @@ __all__ = [
     "AttendanceUpdateResponse",
     "EnrollStudentRequest",
     "EnrollmentResponse",
+    "ConfigRequestPayload",
     "HealthResponse",
+    "HardwareCommandResponse",
+    "HardwareDeviceDetailResponse",
+    "HardwareDeviceSummaryResponse",
+    "HardwareSnapshotResponse",
     "ISICResponse",
     "ISICUpdateRequest",
     "ImportError_",
@@ -81,7 +96,10 @@ __all__ = [
     "SubjectResponse",
     "SubjectUpdate",
     "TokenResponse",
+    "PairingSessionResponse",
+    "UserISICUpdateRequest",
     "UserResponse",
+    "UserUpdateRequest",
     "WeekLessonAttendanceSummary",
     "WeekLessonResponse",
     "WeekNoteUpdate",

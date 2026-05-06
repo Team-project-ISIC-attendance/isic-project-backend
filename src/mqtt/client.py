@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 
 from aiomqtt import Client, MqttError
@@ -34,6 +35,7 @@ class MQTTClient:
         self._client_id = client_id
         self._session_factory = session_factory
         self._running = False
+        self._connected = False
         self._task: asyncio.Task[None] | None = None
 
     async def start(
@@ -47,6 +49,7 @@ class MQTTClient:
 
     async def stop(self) -> None:
         self._running = False
+        self._connected = False
         if self._task:
             self._task.cancel()
             try:
@@ -90,6 +93,8 @@ class MQTTClient:
         except asyncio.CancelledError:
             logger.info("Connection cancelled")
             raise
+        finally:
+            self._connected = False
 
     async def _subscribe(self, client: Client) -> None:
         logger.info(
@@ -97,6 +102,7 @@ class MQTTClient:
             self._hostname,
             self._port,
         )
+        self._connected = True
         await client.subscribe(self._topic)
         logger.info("Subscribed to topic: {}", self._topic)
 
@@ -138,6 +144,35 @@ class MQTTClient:
         logger.error("Connection error in MQTT client")
         await self._schedule_reconnect()
 
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    async def publish(
+        self,
+        topic: str,
+        payload: bytes | bytearray | str | object = b"",
+        *,
+        retain: bool = False,
+    ) -> None:
+        mqtt_payload = _convert_payload_to_bytes(payload)
+        client = Client(
+            hostname=self._hostname,
+            port=self._port,
+            identifier=f"{self._client_id}-publisher",
+        )
+        async with client:
+            await client.publish(topic, payload=mqtt_payload, retain=retain)
+
+    async def publish_json(
+        self,
+        topic: str,
+        payload: object,
+        *,
+        retain: bool = False,
+    ) -> None:
+        await self.publish(topic, json.dumps(payload), retain=retain)
+
     async def _schedule_reconnect(self) -> None:
         if not self._running:
             return
@@ -148,4 +183,3 @@ class MQTTClient:
             if not self._running:
                 return
             await asyncio.sleep(0.1)
-

@@ -27,11 +27,22 @@ ATTENDANCE_STATUS_LABELS: dict[str, str] = {
 
 async def get_students_data(
     session: AsyncSession, subject_id: int
-) -> tuple[Subject, list[tuple[str, str | None, str | None]]]:
+) -> tuple[
+    Subject,
+    list[
+        tuple[
+            str | None,
+            str,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+        ]
+    ],
+]:
     """Query enrolled students for a subject.
 
-    Returns (subject, list of (isic_identifier, first_name, last_name)) sorted
-    by last_name.
+    Returns student rows sorted by student ID, then name.
     """
     subject_result = await session.execute(
         select(Subject).where(Subject.id == subject_id)
@@ -45,11 +56,18 @@ async def get_students_data(
     )
     enrollments = result.scalars().all()
 
-    students: list[tuple[str, str | None, str | None]] = [
-        (e.isic.isic_identifier, e.isic.first_name, e.isic.last_name)
+    students = [
+        (
+            e.isic.student_identifier,
+            e.isic.isic_identifier,
+            e.isic.full_name,
+            e.isic.first_name,
+            e.isic.last_name,
+            e.isic.email_is,
+        )
         for e in enrollments
     ]
-    students.sort(key=lambda s: (s[2] or "", s[1] or ""))
+    students.sort(key=lambda s: (s[0] or "", s[4] or "", s[3] or ""))
 
     return subject, students
 
@@ -60,7 +78,7 @@ async def get_attendance_matrix(
     """Build attendance matrix for export.
 
     Returns (subject, column_headers, data_rows) where each data row is
-    [student_id, isic_identifier, first_name, last_name, status1, status2, ...].
+    [student_identifier, isic_identifier, full_name, first_name, last_name, ...].
     """
     subject_result = await session.execute(
         select(Subject).where(Subject.id == subject_id)
@@ -135,15 +153,20 @@ async def get_attendance_matrix(
     # Build data rows sorted by last_name
     sorted_enrollments = sorted(
         enrollments,
-        key=lambda e: (e.isic.last_name or "", e.isic.first_name or ""),
+        key=lambda e: (
+            e.isic.student_identifier or "",
+            e.isic.last_name or "",
+            e.isic.first_name or "",
+        ),
     )
 
     data_rows: list[list[str]] = []
     for enrollment in sorted_enrollments:
         isic = enrollment.isic
         row = [
-            str(isic.id),
+            isic.student_identifier or "",
             isic.isic_identifier,
+            isic.full_name or "",
             isic.first_name or "",
             isic.last_name or "",
         ]
@@ -156,27 +179,59 @@ async def get_attendance_matrix(
 
 
 def generate_students_csv(
-    students_data: list[tuple[str, str | None, str | None]],
+    students_data: list[
+        tuple[
+            str | None,
+            str,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+        ]
+    ],
 ) -> str:
     """Generate CSV string for student list with UTF-8 BOM."""
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\r\n")
-    writer.writerow(["ISIC", "Meno", "Priezvisko"])
-    for isic_id, first_name, last_name in students_data:
-        writer.writerow([isic_id, first_name or "", last_name or ""])
+    writer.writerow(["ID", "Karta - čip", "Celé meno", "Meno", "Priezvisko", "E-mail IS"])
+    for student_id, isic_id, full_name, first_name, last_name, email_is in students_data:
+        writer.writerow([
+            student_id or "",
+            isic_id,
+            full_name or "",
+            first_name or "",
+            last_name or "",
+            email_is or "",
+        ])
     return output.getvalue()
 
 
 def generate_students_xlsx(
-    students_data: list[tuple[str, str | None, str | None]],
+    students_data: list[
+        tuple[
+            str | None,
+            str,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+        ]
+    ],
 ) -> bytes:
     """Generate XLSX bytes for student list."""
     wb = Workbook()
     ws = wb.active
-    ws.append(["ISIC", "Meno", "Priezvisko"])
-    for isic_id, first_name, last_name in students_data:
-        ws.append([isic_id, first_name or "", last_name or ""])
+    ws.append(["ID", "Karta - čip", "Celé meno", "Meno", "Priezvisko", "E-mail IS"])
+    for student_id, isic_id, full_name, first_name, last_name, email_is in students_data:
+        ws.append([
+            student_id or "",
+            isic_id,
+            full_name or "",
+            first_name or "",
+            last_name or "",
+            email_is or "",
+        ])
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -190,7 +245,7 @@ def generate_attendance_csv(
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\r\n")
-    writer.writerow(["Študent ID", "ISIC", "Meno", "Priezvisko", *column_headers])
+    writer.writerow(["Študent ID", "Karta - čip", "Celé meno", "Meno", "Priezvisko", *column_headers])
     for row in data_rows:
         writer.writerow(row)
     return output.getvalue()
@@ -202,7 +257,7 @@ def generate_attendance_xlsx(
     """Generate XLSX bytes for attendance matrix."""
     wb = Workbook()
     ws = wb.active
-    ws.append(["Študent ID", "ISIC", "Meno", "Priezvisko", *column_headers])
+    ws.append(["Študent ID", "Karta - čip", "Celé meno", "Meno", "Priezvisko", *column_headers])
     for row in data_rows:
         ws.append(row)
     buffer = io.BytesIO()

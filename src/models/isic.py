@@ -10,11 +10,19 @@ class ISIC(Base):
     __tablename__ = "isics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    student_identifier: Mapped[str | None] = mapped_column(
+        String, nullable=True, index=True
+    )
     isic_identifier: Mapped[str] = mapped_column(
         String, nullable=False, unique=True, index=True
     )
+    full_name: Mapped[str | None] = mapped_column(String, nullable=True)
     first_name: Mapped[str | None] = mapped_column(String, nullable=True)
     last_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    study_identification: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    email_is: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -24,4 +32,3 @@ class ISIC(Base):
     scans: Mapped[list["ISICScan"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "ISICScan", back_populates="isic"
     )
-

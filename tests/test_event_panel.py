@@ -249,7 +249,7 @@ async def test_one_time_lesson_attendance_uses_one_time_recurrence_label(
 async def test_move_attendance_success(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """Test: POST move attendance marks the target lesson as a replacement."""
+    """Test: default absent status stays absent after a move."""
     await create_test_user(
         db_session, "admin@ep3.sk", "pass", role=UserRole.admin
     )
@@ -277,7 +277,7 @@ async def test_move_attendance_success(
     assert move_resp.status_code == 200
     assert move_resp.json()["lesson_id"] == target_lesson_id
     assert move_resp.json()["attendance_id"] != attendance_id
-    assert move_resp.json()["status"] == "nahrada"
+    assert move_resp.json()["status"] == "nepritomny"
 
     source_resp = await test_client.get(
         f"/lessons/{first_lesson_id}/attendance",
@@ -290,6 +290,49 @@ async def test_move_attendance_success(
     assert source_resp.status_code == 200
     assert target_resp.status_code == 200
     assert source_resp.json()["students"][0]["status"] == "nepritomny"
+    assert target_resp.json()["students"][0]["status"] == "nepritomny"
+
+
+@pytest.mark.asyncio
+async def test_move_attendance_present_student_becomes_nahrada(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@ep3b.sk", "pass", role=UserRole.admin
+    )
+    headers = await get_auth_header(test_client, "admin@ep3b.sk", "pass")
+    data = await _setup_two_entries(test_client, headers)
+
+    first_lesson_id = data["entry1_lesson_ids"][0]
+    target_lesson_id = data["entry2_lesson_ids"][0]
+
+    att_resp = await test_client.get(
+        f"/lessons/{first_lesson_id}/attendance",
+        headers=headers,
+    )
+    assert att_resp.status_code == 200
+    attendance_id = att_resp.json()["students"][0]["attendance_id"]
+
+    mark_present_resp = await test_client.patch(
+        f"/attendance/{attendance_id}",
+        json={"status": "pritomny"},
+        headers=headers,
+    )
+    assert mark_present_resp.status_code == 200
+
+    move_resp = await test_client.post(
+        f"/attendance/{attendance_id}/move",
+        json={"target_lesson_id": target_lesson_id},
+        headers=headers,
+    )
+    assert move_resp.status_code == 200
+    assert move_resp.json()["status"] == "nahrada"
+
+    target_resp = await test_client.get(
+        f"/lessons/{target_lesson_id}/attendance",
+        headers=headers,
+    )
+    assert target_resp.status_code == 200
     assert target_resp.json()["students"][0]["status"] == "nahrada"
 
 
@@ -393,7 +436,7 @@ async def test_move_attendance_same_named_subject_transfers_enrollment(
     )
     assert move_resp.status_code == 200
     assert move_resp.json()["lesson_id"] == target_lesson_id
-    assert move_resp.json()["status"] == "nahrada"
+    assert move_resp.json()["status"] == "nepritomny"
 
     source_students_resp = await test_client.get(
         f"/subjects/{source_subject_id}/students",
@@ -419,8 +462,7 @@ async def test_move_attendance_same_named_subject_transfers_enrollment(
     assert source_after_resp.status_code == 200
     assert target_after_resp.status_code == 200
     assert source_after_resp.json()["students"] == []
-    assert target_after_resp.json()["students"][0]["status"] == "nahrada"
-
+    assert target_after_resp.json()["students"][0]["status"] == "nepritomny"
 
 @pytest.mark.asyncio
 async def test_move_attendance_different_subject_fails(
@@ -514,7 +556,7 @@ async def test_move_attendance_existing_target_record_succeeds(
     )
     assert move_resp.status_code == 200
     assert move_resp.json()["lesson_id"] == target_lesson_id
-    assert move_resp.json()["status"] == "nahrada"
+    assert move_resp.json()["status"] == "nepritomny"
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import ensure_subject_access, get_current_user
 from src.database.connection import get_db
+from src.models.subject import Subject
 from src.models.user import User
 from src.services.export_service import (
     generate_attendance_csv,
@@ -37,6 +38,13 @@ async def export_students(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported format: {format}. Use csv or xlsx.",
         )
+    subject_record = await db.get(Subject, subject_id)
+    if subject_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject_record)
 
     subject, students_data = await get_students_data(db, subject_id)
     today = date.today().isoformat()
@@ -78,6 +86,13 @@ async def export_attendance(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported format: {format}. Use csv or xlsx.",
         )
+    subject_record = await db.get(Subject, subject_id)
+    if subject_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject_record)
 
     subject, column_headers, data_rows = await get_attendance_matrix(
         db, subject_id, semester_id

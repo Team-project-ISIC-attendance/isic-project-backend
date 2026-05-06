@@ -2,13 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import (
+    ensure_subject_access,
+    get_current_user,
+    require_teacher_or_admin,
+)
 from src.api.schemas import (
     EnrollmentResponse,
     EnrollStudentRequest,
     ImportResult,
 )
 from src.database.connection import get_db
+from src.models.subject import Subject
 from src.models.user import User
 from src.services.csv_parser import parse_csv
 from src.services.enrollment_service import (
@@ -17,6 +22,7 @@ from src.services.enrollment_service import (
     import_students,
     list_enrolled_students,
 )
+from src.utils.datetime import isoformat_utc
 
 router = APIRouter(
     prefix="/subjects/{subject_id}/students",
@@ -28,10 +34,14 @@ def _enrollment_response(enrollment: "Enrollment") -> EnrollmentResponse:  # typ
     return EnrollmentResponse(
         enrollment_id=enrollment.id,
         isic_id=enrollment.isic.id,
+        student_identifier=enrollment.isic.student_identifier,
         isic_identifier=enrollment.isic.isic_identifier,
+        full_name=enrollment.isic.full_name,
         first_name=enrollment.isic.first_name,
         last_name=enrollment.isic.last_name,
-        enrolled_at=enrollment.enrolled_at.isoformat(),
+        study_identification=enrollment.isic.study_identification,
+        email_is=enrollment.isic.email_is,
+        enrolled_at=isoformat_utc(enrollment.enrolled_at) or "",
     )
 
 
@@ -45,6 +55,13 @@ async def list_students(
     current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> list[EnrollmentResponse]:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject)
     enrollments = await list_enrolled_students(db, subject_id)
     return [_enrollment_response(e) for e in enrollments]
 
@@ -62,6 +79,14 @@ async def enroll_student_endpoint(
     current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> EnrollmentResponse:
+    require_teacher_or_admin(current_user)
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject)
     try:
         enrollment = await enroll_student(
             db,
@@ -94,6 +119,14 @@ async def import_students_endpoint(
     current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ImportResult:
+    require_teacher_or_admin(current_user)
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject)
     content = await file.read()
     rows, errors = parse_csv(content)
     try:
@@ -116,6 +149,14 @@ async def delete_enrollment_endpoint(
     current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> dict[str, str]:
+    require_teacher_or_admin(current_user)
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found",
+        )
+    ensure_subject_access(current_user, subject)
     deleted = await delete_enrollment(db, enrollment_id, subject_id)
     if not deleted:
         raise HTTPException(

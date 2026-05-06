@@ -1,6 +1,11 @@
 from src.models.attendance import AttendanceRecord, AttendanceStatus, MarkedBy
 from src.models.base import Base
+from src.models.device_pairing_session import (
+    DevicePairingSession,
+    DevicePairingStatus,
+)
 from src.models.enrollment import Enrollment
+from src.models.hardware_device import HardwareDevice
 from src.models.isic import ISIC
 from src.models.lesson import Lesson
 from src.models.scan import ISICScan
@@ -15,7 +20,10 @@ __all__ = [
     "AttendanceRecord",
     "AttendanceStatus",
     "Base",
+    "DevicePairingSession",
+    "DevicePairingStatus",
     "Enrollment",
+    "HardwareDevice",
     "ISICScan",
     "Lesson",
     "LessonType",
@@ -27,4 +35,3 @@ __all__ = [
     "UserRole",
     "WeekNote",
 ]
-

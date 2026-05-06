@@ -2,14 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import require_admin
+from src.api.dependencies import (
+    ensure_semester_access,
+    get_current_user,
+    require_teacher_or_admin,
+)
 from src.api.schemas import SemesterCreate, SemesterResponse
 from src.database.connection import get_db
 from src.models.user import User
 from src.services.semester_service import (
     create_semester,
     delete_semester,
-    get_all_semesters,
+    get_semester_by_id,
+    get_semesters_for_user,
 )
 
 router = APIRouter(prefix="/semesters", tags=["semesters"])
@@ -21,10 +26,10 @@ router = APIRouter(prefix="/semesters", tags=["semesters"])
     summary="List all semesters",
 )
 async def list_semesters(
-    _user: User = Depends(require_admin),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> list[SemesterResponse]:
-    semesters = await get_all_semesters(db)
+    semesters = await get_semesters_for_user(db, current_user)
     return [
         SemesterResponse(
             id=s.id,
@@ -46,9 +51,10 @@ async def list_semesters(
 )
 async def create_semester_endpoint(
     data: SemesterCreate,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> SemesterResponse:
+    require_teacher_or_admin(current_user)
     try:
         semester = await create_semester(
             db,
@@ -56,6 +62,7 @@ async def create_semester_endpoint(
             start_date=data.start_date,
             end_date=data.end_date,
             total_weeks=data.total_weeks,
+            owner_id=current_user.id,
         )
     except IntegrityError as err:
         raise HTTPException(
@@ -79,13 +86,17 @@ async def create_semester_endpoint(
 )
 async def delete_semester_endpoint(
     semester_id: int,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    current_user: User = Depends(get_current_user),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> dict[str, str]:
-    deleted = await delete_semester(db, semester_id)
-    if not deleted:
+    require_teacher_or_admin(current_user)
+    semester = await get_semester_by_id(db, semester_id)
+    if semester is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Semester not found",
         )
+    ensure_semester_access(current_user, semester)
+    deleted = await delete_semester(db, semester_id)
+    assert deleted
     return {"detail": "Semester deleted"}

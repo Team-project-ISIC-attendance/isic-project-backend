@@ -1,11 +1,16 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.isic import ISIC
 from src.models.scan import ISICScan
+from src.utils.datetime import coerce_utc_datetime
+
+
+def normalize_isic_identifier(isic_identifier: str) -> str:
+    return isic_identifier.strip().upper()
 
 
 async def get_or_create_isic(
@@ -13,19 +18,46 @@ async def get_or_create_isic(
     isic_identifier: str,
     first_name: str | None = None,
     last_name: str | None = None,
+    *,
+    student_identifier: str | None = None,
+    full_name: str | None = None,
+    study_identification: str | None = None,
+    email_is: str | None = None,
 ) -> ISIC:
-    stmt = select(ISIC).where(ISIC.isic_identifier == isic_identifier)
+    normalized_identifier = normalize_isic_identifier(isic_identifier)
+    stmt = select(ISIC).where(
+        func.upper(func.trim(ISIC.isic_identifier)) == normalized_identifier
+    )
     result = await session.execute(stmt)
     isic = result.scalar_one_or_none()
 
     if isic is None:
         isic = ISIC(
-            isic_identifier=isic_identifier,
+            student_identifier=student_identifier,
+            isic_identifier=normalized_identifier,
+            full_name=full_name,
             first_name=first_name,
             last_name=last_name,
+            study_identification=study_identification,
+            email_is=email_is,
         )
         session.add(isic)
         await session.flush()
+    elif isic.isic_identifier != normalized_identifier:
+        isic.isic_identifier = normalized_identifier
+
+    if student_identifier and not isic.student_identifier:
+        isic.student_identifier = student_identifier
+    if full_name and not isic.full_name:
+        isic.full_name = full_name
+    if first_name and not isic.first_name:
+        isic.first_name = first_name
+    if last_name and not isic.last_name:
+        isic.last_name = last_name
+    if study_identification and not isic.study_identification:
+        isic.study_identification = study_identification
+    if email_is and not isic.email_is:
+        isic.email_is = email_is
 
     return isic
 
@@ -33,18 +65,24 @@ async def get_or_create_isic(
 def _get_current_timestamp_if_none(timestamp: datetime | None) -> datetime:
     if timestamp is None:
         return datetime.now(UTC)
-    return timestamp
+    return coerce_utc_datetime(timestamp)
 
 
 async def create_scan(
     session: AsyncSession,
     isic_id: int,
     timestamp: datetime | None = None,
+    hardware_device_id: int | None = None,
+    mqtt_topic: str | None = None,
+    mqtt_sequence: int | None = None,
 ) -> ISICScan:
     scan_timestamp = _get_current_timestamp_if_none(timestamp)
 
     scan = ISICScan(
         isic_id=isic_id,
+        hardware_device_id=hardware_device_id,
+        mqtt_topic=mqtt_topic,
+        mqtt_sequence=mqtt_sequence,
         timestamp=scan_timestamp,
     )
     session.add(scan)
@@ -59,11 +97,21 @@ async def create_scan_with_identifier(
     first_name: str | None = None,
     last_name: str | None = None,
     timestamp: datetime | None = None,
+    hardware_device_id: int | None = None,
+    mqtt_topic: str | None = None,
+    mqtt_sequence: int | None = None,
 ) -> ISICScan:
     isic = await get_or_create_isic(
         session, isic_identifier, first_name, last_name
     )
-    return await create_scan(session, isic.id, timestamp)
+    return await create_scan(
+        session,
+        isic.id,
+        timestamp,
+        hardware_device_id=hardware_device_id,
+        mqtt_topic=mqtt_topic,
+        mqtt_sequence=mqtt_sequence,
+    )
 
 
 async def get_scans(
@@ -73,7 +121,10 @@ async def get_scans(
 ) -> list[ISICScan]:
     stmt = (
         select(ISICScan)
-        .options(selectinload(ISICScan.isic))
+        .options(
+            selectinload(ISICScan.isic),
+            selectinload(ISICScan.hardware_device),
+        )
         .order_by(ISICScan.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -88,7 +139,10 @@ async def get_scan_by_id(
 ) -> ISICScan | None:
     stmt = (
         select(ISICScan)
-        .options(selectinload(ISICScan.isic))
+        .options(
+            selectinload(ISICScan.isic),
+            selectinload(ISICScan.hardware_device),
+        )
         .where(ISICScan.id == scan_id)
     )
     result = await session.execute(stmt)
@@ -99,9 +153,15 @@ async def get_isic_by_identifier(
     session: AsyncSession,
     isic_identifier: str,
 ) -> ISIC | None:
-    stmt = select(ISIC).where(ISIC.isic_identifier == isic_identifier)
+    normalized_identifier = normalize_isic_identifier(isic_identifier)
+    stmt = select(ISIC).where(
+        func.upper(func.trim(ISIC.isic_identifier)) == normalized_identifier
+    )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    isic = result.scalar_one_or_none()
+    if isic is not None and isic.isic_identifier != normalized_identifier:
+        isic.isic_identifier = normalized_identifier
+    return isic
 
 
 async def update_isic(
@@ -122,4 +182,3 @@ async def update_isic(
     await session.commit()
     await session.refresh(isic)
     return isic
-

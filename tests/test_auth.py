@@ -12,11 +12,13 @@ async def create_test_user(
     email: str,
     password: str,
     role: UserRole = UserRole.teacher,
+    isic_identifier: str | None = None,
     first_name: str = "Test",
     last_name: str = "User",
 ) -> User:
     user = User(
         email=email,
+        isic_identifier=isic_identifier,
         hashed_password=hash_password(password),
         first_name=first_name,
         last_name=last_name,

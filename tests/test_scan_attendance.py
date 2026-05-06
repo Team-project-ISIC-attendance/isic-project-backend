@@ -1,17 +1,26 @@
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.models.user import UserRole
 from src.mqtt.client import MQTTClient
 from src.services.scan_service import get_scans
 from tests.helpers.mqtt_simulator import (
+    publish_attendance_message,
     publish_scan_message,
     wait_for_message_processing,
 )
 from tests.test_auth import create_test_user, get_auth_header
+
+
+def _current_schedule_time() -> datetime:
+    return datetime.now(UTC).astimezone(
+        ZoneInfo(settings.schedule_time_zone)
+    )
 
 
 async def _create_lesson_matching_now(
@@ -29,7 +38,7 @@ async def _create_lesson_matching_now(
     and the semester start_date is Monday of the current week so
     week-1 lesson lands on today.
     """
-    now = datetime.now(UTC)
+    now = _current_schedule_time()
     today = now.date()
     # Monday of the current week
     monday = today - timedelta(days=today.weekday())
@@ -116,6 +125,75 @@ async def _create_lesson_matching_now(
     }
 
 
+async def _create_empty_lesson_matching_now(
+    client: AsyncClient,
+    headers: dict[str, str],
+    subject_code: str,
+) -> dict[str, int]:
+    """Create semester + subject + schedule entry with an active lesson and no students."""
+    now = _current_schedule_time()
+    today = now.date()
+    monday = today - timedelta(days=today.weekday())
+    day_of_week = today.isoweekday()
+
+    start_time = (now - timedelta(minutes=30)).strftime("%H:%M")
+    end_time = (now + timedelta(minutes=90)).strftime("%H:%M")
+
+    sem_resp = await client.post(
+        "/semesters",
+        json={
+            "name": f"ScanSem-{subject_code}",
+            "start_date": monday.isoformat(),
+            "end_date": (monday + timedelta(weeks=13)).isoformat(),
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+    assert sem_resp.status_code == 201
+    semester_id = sem_resp.json()["id"]
+
+    subj_resp = await client.post(
+        "/subjects",
+        json={"name": f"ScanSubj-{subject_code}", "code": subject_code, "color": "#FF5722"},
+        headers=headers,
+    )
+    assert subj_resp.status_code == 201
+    subject_id = subj_resp.json()["id"]
+
+    sched_resp = await client.post(
+        f"/semesters/{semester_id}/schedule",
+        json={
+            "subject_id": subject_id,
+            "day_of_week": day_of_week,
+            "start_time": start_time,
+            "end_time": end_time,
+            "room": "A101",
+            "lesson_type": "cvicenie",
+        },
+        headers=headers,
+    )
+    assert sched_resp.status_code == 201
+    entry_id = sched_resp.json()["id"]
+
+    lessons_resp = await client.get(
+        f"/semesters/{semester_id}/schedule/{entry_id}/lessons",
+        headers=headers,
+    )
+    assert lessons_resp.status_code == 200
+    lessons = lessons_resp.json()
+    today_lesson = next(
+        (le for le in lessons if le["date"] == today.isoformat()), None
+    )
+    assert today_lesson is not None, f"No lesson found for {today.isoformat()}"
+
+    return {
+        "semester_id": semester_id,
+        "subject_id": subject_id,
+        "entry_id": entry_id,
+        "lesson_id": today_lesson["id"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_scan_during_lesson(
     mqtt_client: MQTTClient,
@@ -159,7 +237,7 @@ async def test_scan_outside_window(
     )
     headers = await get_auth_header(test_client, "admin@scan2.sk", "pass")
 
-    now = datetime.now(UTC)
+    now = _current_schedule_time()
     today = now.date()
     monday = today - timedelta(days=today.weekday())
     day_of_week = today.isoweekday()
@@ -248,6 +326,112 @@ async def test_scan_unenrolled_student(
     scans = await get_scans(db_session, limit=100, offset=0)
     found = any(s.isic.isic_identifier == "SCAN_UNENROLLED_01" for s in scans)
     assert found, "ISICScan should be created for unenrolled student"
+
+
+@pytest.mark.asyncio
+async def test_scan_matches_schedule_timezone(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    test_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Scan timestamp should be interpreted in the configured schedule timezone."""
+    await create_test_user(
+        db_session, "admin@scan-tz.sk", "pass", role=UserRole.admin,
+    )
+    headers = await get_auth_header(test_client, "admin@scan-tz.sk", "pass")
+
+    original_timezone = settings.schedule_time_zone
+    settings.schedule_time_zone = "Europe/Bratislava"
+
+    try:
+        local_now = datetime.now(UTC).astimezone(ZoneInfo(settings.schedule_time_zone))
+        today = local_now.date()
+        monday = today - timedelta(days=today.weekday())
+        day_of_week = today.isoweekday()
+
+        start_time = (local_now - timedelta(minutes=30)).strftime("%H:%M")
+        end_time = (local_now + timedelta(minutes=90)).strftime("%H:%M")
+
+        sem_resp = await test_client.post(
+            "/semesters",
+            json={
+                "name": "ScanSem-TZ",
+                "start_date": monday.isoformat(),
+                "end_date": (monday + timedelta(weeks=13)).isoformat(),
+                "total_weeks": 13,
+            },
+            headers=headers,
+        )
+        assert sem_resp.status_code == 201
+        semester_id = sem_resp.json()["id"]
+
+        subj_resp = await test_client.post(
+            "/subjects",
+            json={"name": "ScanSubj-TZ", "code": "SCTZ", "color": "#FF5722"},
+            headers=headers,
+        )
+        assert subj_resp.status_code == 201
+        subject_id = subj_resp.json()["id"]
+
+        sched_resp = await test_client.post(
+            f"/semesters/{semester_id}/schedule",
+            json={
+                "subject_id": subject_id,
+                "day_of_week": day_of_week,
+                "start_time": start_time,
+                "end_time": end_time,
+                "room": "A101",
+                "lesson_type": "cvicenie",
+            },
+            headers=headers,
+        )
+        assert sched_resp.status_code == 201
+        entry_id = sched_resp.json()["id"]
+
+        enroll_resp = await test_client.post(
+            f"/subjects/{subject_id}/students",
+            json={
+                "isic_identifier": "SCAN_TZ_01",
+                "first_name": "TimeZone",
+                "last_name": "Student",
+            },
+            headers=headers,
+        )
+        assert enroll_resp.status_code == 201
+
+        lessons_resp = await test_client.get(
+            f"/semesters/{semester_id}/schedule/{entry_id}/lessons",
+            headers=headers,
+        )
+        assert lessons_resp.status_code == 200
+        today_lesson = next(
+            (le for le in lessons_resp.json() if le["date"] == today.isoformat()), None
+        )
+        assert today_lesson is not None, f"No lesson found for {today.isoformat()}"
+
+        scan_utc = local_now.astimezone(ZoneInfo("UTC"))
+        timestamp_ms = int(scan_utc.timestamp() * 1000)
+
+        await publish_attendance_message(
+            mqtt_host,
+            mqtt_port,
+            "SCAN_TZ_01",
+            timestamp_ms=timestamp_ms,
+        )
+        await wait_for_message_processing()
+
+        att_resp = await test_client.get(
+            f"/lessons/{today_lesson['id']}/attendance",
+            headers=headers,
+        )
+        assert att_resp.status_code == 200
+        student = att_resp.json()["students"][0]
+        assert student["status"] == "pritomny"
+        assert student["marked_by"] == "scan"
+    finally:
+        settings.schedule_time_zone = original_timezone
 
 
 @pytest.mark.asyncio
@@ -371,3 +555,103 @@ async def test_existing_mqtt(
     scans = await get_scans(db_session, limit=100, offset=0)
     found = any(s.isic.isic_identifier == isic_identifier for s in scans)
     assert found, "ISICScan record should be created by existing MQTT handler"
+
+
+@pytest.mark.asyncio
+async def test_scan_after_enrollment_of_previously_scanned_isic(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    test_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A scan after enrollment should mark attendance even if the ISIC was scanned earlier."""
+    await create_test_user(
+        db_session, "admin@scan7.sk", "pass", role=UserRole.admin,
+    )
+    headers = await get_auth_header(test_client, "admin@scan7.sk", "pass")
+    isic_identifier = "SCAN_AFTER_ENROLL_01"
+    ids = await _create_empty_lesson_matching_now(
+        test_client, headers, "SC07",
+    )
+
+    await publish_scan_message(mqtt_host, mqtt_port, isic_identifier)
+    await wait_for_message_processing()
+
+    empty_att_resp = await test_client.get(
+        f"/lessons/{ids['lesson_id']}/attendance", headers=headers
+    )
+    assert empty_att_resp.status_code == 200
+    assert empty_att_resp.json()["students"] == []
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{ids['subject_id']}/students",
+        json={
+            "isic_identifier": isic_identifier,
+            "first_name": "Late",
+            "last_name": "Enroll",
+        },
+        headers=headers,
+    )
+    assert enroll_resp.status_code == 201
+
+    pre_scan_att_resp = await test_client.get(
+        f"/lessons/{ids['lesson_id']}/attendance", headers=headers
+    )
+    assert pre_scan_att_resp.status_code == 200
+    pre_scan_student = pre_scan_att_resp.json()["students"][0]
+    assert pre_scan_student["status"] == "nepritomny"
+    assert pre_scan_student["marked_by"] == "manual"
+
+    await publish_scan_message(mqtt_host, mqtt_port, isic_identifier)
+    await wait_for_message_processing()
+
+    att_resp = await test_client.get(
+        f"/lessons/{ids['lesson_id']}/attendance", headers=headers
+    )
+    assert att_resp.status_code == 200
+    student = att_resp.json()["students"][0]
+    assert student["status"] == "pritomny"
+    assert student["marked_by"] == "scan"
+    assert student["scan_timestamp"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_matches_enrollment_identifier_case_and_whitespace(
+    mqtt_client: MQTTClient,
+    mqtt_host: str,
+    mqtt_port: int,
+    test_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Scan identifiers should match enrolled identifiers regardless of case and spaces."""
+    await create_test_user(
+        db_session, "admin@scan8.sk", "pass", role=UserRole.admin,
+    )
+    headers = await get_auth_header(test_client, "admin@scan8.sk", "pass")
+    scanned_identifier = "A1B2C3D4"
+    ids = await _create_empty_lesson_matching_now(
+        test_client, headers, "SC08",
+    )
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{ids['subject_id']}/students",
+        json={
+            "isic_identifier": f"  {scanned_identifier.lower()}  ",
+            "first_name": "Case",
+            "last_name": "Mismatch",
+        },
+        headers=headers,
+    )
+    assert enroll_resp.status_code == 201
+
+    await publish_scan_message(mqtt_host, mqtt_port, scanned_identifier)
+    await wait_for_message_processing()
+
+    att_resp = await test_client.get(
+        f"/lessons/{ids['lesson_id']}/attendance", headers=headers
+    )
+    assert att_resp.status_code == 200
+    student = att_resp.json()["students"][0]
+    assert student["status"] == "pritomny"
+    assert student["marked_by"] == "scan"

@@ -9,6 +9,7 @@ from loguru import logger
 from src.api.attendance import router as attendance_router
 from src.api.auth import router as auth_router
 from src.api.export import router as export_router
+from src.api.hardware import router as hardware_router
 from src.api.lessons import router as lessons_router
 from src.api.routes import router
 from src.api.schedule import router as schedule_router
@@ -18,9 +19,12 @@ from src.api.subjects import router as subjects_router
 from src.api.weeks import router as weeks_router
 from src.config import settings
 from src.database.connection import AsyncSessionLocal, engine
+from src.logging_config import configure_logging
 from src.mqtt.client import MQTTClient
 from src.mqtt.handler import handle_mqtt_message
 from src.services.auth_service import ensure_admin_exists
+
+configure_logging()
 
 
 def _create_mqtt_client() -> MQTTClient:
@@ -54,7 +58,9 @@ async def _shutdown_application(mqtt_client: MQTTClient) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     mqtt_client = await _startup_application()
+    app.state.mqtt_client = mqtt_client
     yield
+    app.state.mqtt_client = None
     await _shutdown_application(mqtt_client)
 
 
@@ -75,6 +81,7 @@ app.add_middleware(
 app.include_router(attendance_router)
 app.include_router(auth_router)
 app.include_router(export_router)
+app.include_router(hardware_router)
 app.include_router(lessons_router)
 app.include_router(router)
 app.include_router(semesters_router)
@@ -91,4 +98,3 @@ if __name__ == "__main__":
         port=settings.http_port,
         reload=settings.debug,
     )
-

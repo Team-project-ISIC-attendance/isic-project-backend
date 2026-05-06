@@ -1,10 +1,10 @@
 # ISIC Project Backend
 
-Backend service for ISIC student identification system. 
+Backend service for ISIC student identification system.
 
 ## Features
 
-- **MQTT Integration**: Subscribes to scan events on `isic/scan` topic
+- **MQTT Integration**: Subscribes generically to hardware MQTT topics and accepts arbitrary hardware `baseTopic/deviceId/...` paths
 - **Auto-registration**: Creates ISIC records on first scan
 - **REST API**: Query scans, update ISIC information
 - **Database**: SQLite with async SQLAlchemy
@@ -19,7 +19,21 @@ Backend service for ISIC student identification system.
 
 ## MQTT Message Format
 
-Accepts JSON only:
+The backend is not coupled to a fixed `device/...` prefix. It expects hardware topics in the documented shape:
+
+```text
+<baseTopic>/<deviceId>/<topicSuffix>
+```
+
+Examples:
+
+```text
+device/ISIC-ESP8266-001/attendance
+campus/isic/HW-ROOM-01/attendance
+prod/readers/BLOCK-A-01/health
+```
+
+Attendance payloads accept JSON only:
 
 ```json
 {
@@ -46,7 +60,7 @@ The timestamp is automatically generated on the backend when the message is rece
 - `DATABASE_URL` - SQLite database path (default: `sqlite+aiosqlite:///./data/database.db`)
 - `MQTT_BROKER_HOST` - MQTT broker hostname (default: `localhost`)
 - `MQTT_BROKER_PORT` - MQTT broker port (default: `1883`)
-- `MQTT_TOPIC` - MQTT topic to subscribe (default: `isic/scan`)
+- `MQTT_TOPIC` - MQTT topic subscription wildcard (default: `+/+/#`)
 - `HTTP_HOST` - API host (required)
 - `HTTP_PORT` - API port (required)
 
@@ -57,6 +71,8 @@ docker compose up --build backend mqtt
 ```
 
 Starts backend on port 8000 and MQTT broker on port 1883.
+
+Use `MQTT_TOPIC=#` if you want to consume every MQTT topic and let the backend ignore unrelated ones. The default `+/+/#` is generic enough for hardware topics without subscribing to the entire broker namespace.
 
 **Run locally:**
 ```bash

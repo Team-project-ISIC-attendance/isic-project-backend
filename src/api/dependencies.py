@@ -1,8 +1,13 @@
-from fastapi import Depends, HTTPException, status
+from typing import cast
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.connection import get_db
+from src.mqtt.client import MQTTClient
+from src.models.semester import Semester
+from src.models.subject import Subject
 from src.models.user import User
 from src.services.auth_service import decode_access_token, get_user_by_email
 
@@ -46,3 +51,58 @@ async def require_admin(
             detail="Admin access required",
         )
     return user
+
+
+def require_teacher_or_admin(user: User) -> None:
+    if user.role.value in {"admin", "teacher"}:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Teacher or admin access required",
+    )
+
+
+def ensure_semester_access(user: User, semester: Semester) -> None:
+    if user.role.value == "admin":
+        return
+    if semester.owner_id == user.id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not your semester",
+    )
+
+
+def ensure_subject_access(user: User, subject: Subject) -> None:
+    if user.role.value == "admin":
+        return
+    if subject.teacher_id == user.id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not your subject",
+    )
+
+
+def ensure_subject_matches_semester(subject: Subject, semester: Semester) -> None:
+    if semester.owner_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Semester has no owner",
+        )
+    if subject.teacher_id == semester.owner_id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Subject does not belong to this semester",
+    )
+
+
+def get_mqtt_client(request: Request) -> MQTTClient:
+    mqtt_client = getattr(request.app.state, "mqtt_client", None)
+    if mqtt_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQTT client is not available",
+        )
+    return cast(MQTTClient, mqtt_client)

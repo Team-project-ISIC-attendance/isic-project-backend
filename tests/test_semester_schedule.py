@@ -56,6 +56,68 @@ async def test_create_semester_weeks_auto(
 
 
 @pytest.mark.asyncio
+async def test_create_semester_rejects_mismatched_week_count(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@sem-mismatch.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="Mismatch",
+    )
+    headers = await get_auth_header(
+        test_client, "admin@sem-mismatch.sk", "pass"
+    )
+
+    response = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Mismatch",
+            "start_date": "2026-02-17",
+            "end_date": "2026-02-20",
+            "total_weeks": 13,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert "total_weeks" in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_semester_counts_calendar_weeks_for_partial_first_week(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "admin@sem-partial.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="Partial",
+    )
+    headers = await get_auth_header(
+        test_client, "admin@sem-partial.sk", "pass"
+    )
+
+    response = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Partial Week",
+            "start_date": "2026-02-17",
+            "end_date": "2026-02-27",
+            "total_weeks": 2,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    weeks_resp = await test_client.get(
+        f"/semesters/{response.json()['id']}/weeks", headers=headers
+    )
+    assert weeks_resp.status_code == 200
+    weeks = weeks_resp.json()
+    assert [week["date_range"] for week in weeks] == [
+        "16.2. - 20.2.",
+        "23.2. - 27.2.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_create_subject_visible(
     test_client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -611,6 +673,110 @@ async def test_teacher_subject_isolation(
     r_admin = await test_client.get("/subjects", headers=h_admin)
     admin_subjects = r_admin.json()
     assert len(admin_subjects) == 2
+
+
+@pytest.mark.asyncio
+async def test_teacher_semesters_are_isolated(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "t1@semiso.sk", "pass",
+        first_name="Teacher", last_name="One",
+    )
+    await create_test_user(
+        db_session, "t2@semiso.sk", "pass",
+        first_name="Teacher", last_name="Two",
+    )
+    await create_test_user(
+        db_session, "admin@semiso.sk", "pass", role=UserRole.admin,
+        first_name="Admin", last_name="User",
+    )
+
+    h1 = await get_auth_header(test_client, "t1@semiso.sk", "pass")
+    h2 = await get_auth_header(test_client, "t2@semiso.sk", "pass")
+    h_admin = await get_auth_header(test_client, "admin@semiso.sk", "pass")
+
+    resp1 = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Teacher One Sem",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=h1,
+    )
+    assert resp1.status_code == 201
+    semester1_id = resp1.json()["id"]
+
+    resp2 = await test_client.post(
+        "/semesters",
+        json={
+            "name": "Teacher Two Sem",
+            "start_date": "2026-02-16",
+            "end_date": "2026-05-16",
+            "total_weeks": 13,
+        },
+        headers=h2,
+    )
+    assert resp2.status_code == 201
+
+    list1 = await test_client.get("/semesters", headers=h1)
+    assert list1.status_code == 200
+    assert [item["name"] for item in list1.json()] == ["Teacher One Sem"]
+
+    list2 = await test_client.get("/semesters", headers=h2)
+    assert list2.status_code == 200
+    assert [item["name"] for item in list2.json()] == ["Teacher Two Sem"]
+
+    list_admin = await test_client.get("/semesters", headers=h_admin)
+    assert list_admin.status_code == 200
+    assert {item["name"] for item in list_admin.json()} == {
+        "Teacher One Sem",
+        "Teacher Two Sem",
+    }
+
+    forbidden = await test_client.get(
+        f"/semesters/{semester1_id}/weeks",
+        headers=h2,
+    )
+    assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_teacher_cannot_manage_students_of_foreign_subject(
+    test_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await create_test_user(
+        db_session, "owner@students.sk", "pass",
+        first_name="Owner", last_name="Teacher",
+    )
+    await create_test_user(
+        db_session, "other@students.sk", "pass",
+        first_name="Other", last_name="Teacher",
+    )
+
+    owner_headers = await get_auth_header(test_client, "owner@students.sk", "pass")
+    other_headers = await get_auth_header(test_client, "other@students.sk", "pass")
+
+    subject_resp = await test_client.post(
+        "/subjects",
+        json={"name": "Private Subject", "code": "PRIV1", "color": "#123456"},
+        headers=owner_headers,
+    )
+    assert subject_resp.status_code == 201
+    subject_id = subject_resp.json()["id"]
+
+    enroll_resp = await test_client.post(
+        f"/subjects/{subject_id}/students",
+        json={
+            "isic_identifier": "199000001",
+            "first_name": "Alice",
+            "last_name": "Student",
+        },
+        headers=other_headers,
+    )
+    assert enroll_resp.status_code == 403
 
 
 @pytest.mark.asyncio

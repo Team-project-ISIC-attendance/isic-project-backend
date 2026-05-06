@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy import delete, select
@@ -18,6 +19,8 @@ from src.models.schedule_entry import ScheduleEntry
 from src.models.semester import Semester
 from src.models.subject import Subject
 from src.services.schedule_service import compute_week_date_range
+from src.utils.datetime import coerce_utc_datetime, isoformat_utc
+from src.utils.semester import get_semester_week_monday
 
 _DAY_NAMES_SK = {
     1: "pondelok",
@@ -45,6 +48,16 @@ def _recurrence_label(entry: ScheduleEntry) -> str:
 
 def _same_subject_name(source: Subject, target: Subject) -> bool:
     return source.name.strip().casefold() == target.name.strip().casefold()
+
+
+def _target_status_for_move(status: AttendanceStatus) -> AttendanceStatus:
+    if status in {AttendanceStatus.pritomny, AttendanceStatus.nahrada}:
+        return AttendanceStatus.nahrada
+    return AttendanceStatus.nepritomny
+
+
+def _coerce_utc_timestamp(timestamp: datetime) -> datetime:
+    return coerce_utc_datetime(timestamp)
 
 
 def _compute_summary(records: list[AttendanceRecord]) -> dict[str, int]:
@@ -104,20 +117,28 @@ async def get_lesson_attendance(
 
     sorted_records = sorted(
         lesson.attendance_records,
-        key=lambda r: (r.isic.last_name or "", r.isic.first_name or ""),
+        key=lambda r: (
+            r.isic.student_identifier or "",
+            r.isic.last_name or "",
+            r.isic.first_name or "",
+        ),
     )
 
     students = []
     for record in sorted_records:
         scan_timestamp: str | None = None
         if record.scan is not None:
-            scan_timestamp = record.scan.timestamp.isoformat()
+            scan_timestamp = isoformat_utc(record.scan.timestamp)
         students.append({
             "attendance_id": record.id,
             "enrollment_id": enrollment_by_isic_id.get(record.isic_id),
+            "student_identifier": record.isic.student_identifier,
             "isic_identifier": record.isic.isic_identifier,
+            "full_name": record.isic.full_name,
             "first_name": record.isic.first_name,
             "last_name": record.isic.last_name,
+            "study_identification": record.isic.study_identification,
+            "email_is": record.isic.email_is,
             "status": record.status.value,
             "marked_by": record.marked_by.value,
             "scan_timestamp": scan_timestamp,
@@ -210,6 +231,8 @@ async def move_attendance(
     if not _same_subject_name(source_subject, target_subject):
         return "Target lesson belongs to a different subject/event"
 
+    target_status = _target_status_for_move(record.status)
+
     target_record_stmt = select(AttendanceRecord).where(
         AttendanceRecord.lesson_id == target_lesson_id,
         AttendanceRecord.isic_id == record.isic_id,
@@ -294,12 +317,12 @@ async def move_attendance(
         target_record = AttendanceRecord(
             lesson_id=target_lesson_id,
             isic_id=record.isic_id,
-            status=AttendanceStatus.nahrada,
+            status=target_status,
             marked_by=MarkedBy.manual,
         )
         session.add(target_record)
     else:
-        target_record.status = AttendanceStatus.nahrada
+        target_record.status = target_status
         target_record.marked_by = MarkedBy.manual
         target_record.scan_id = None
 
@@ -310,7 +333,7 @@ async def move_attendance(
 
 def _is_current_week(semester_start: date, week_number: int, today: date) -> bool:
     """Check if a week is the current week based on semester start date."""
-    monday = semester_start + timedelta(days=(week_number - 1) * 7)
+    monday = get_semester_week_monday(semester_start, week_number)
     sunday = monday + timedelta(days=6)
     return monday <= today <= sunday
 
@@ -377,7 +400,11 @@ async def get_schedule_entry_overview(
     enroll_result = await session.execute(enroll_stmt)
     enrollments = list(enroll_result.scalars().all())
     enrollments.sort(
-        key=lambda e: (e.isic.last_name or "", e.isic.first_name or "")
+        key=lambda e: (
+            e.isic.student_identifier or "",
+            e.isic.last_name or "",
+            e.isic.first_name or "",
+        )
     )
 
     # Build attendance lookup: (lesson_id, isic_id) → AttendanceRecord
@@ -407,9 +434,14 @@ async def get_schedule_entry_overview(
                     "status": record.status.value if record else None,
                 })
         students.append({
+            "enrollment_id": enrollment.id,
+            "student_identifier": isic.student_identifier,
             "isic_identifier": isic.isic_identifier,
+            "full_name": isic.full_name,
             "first_name": isic.first_name,
             "last_name": isic.last_name,
+            "study_identification": isic.study_identification,
+            "email_is": isic.email_is,
             "weeks": student_weeks,
         })
 
@@ -443,8 +475,11 @@ async def try_auto_record(
     Finds active lessons within the scan time window and updates
     attendance records from nepritomny/manual to pritomny/scan.
     """
-    scan_date = scan_timestamp.date()
-    scan_naive = scan_timestamp.replace(tzinfo=None)
+    scan_local = _coerce_utc_timestamp(scan_timestamp).astimezone(
+        ZoneInfo(settings.schedule_time_zone)
+    )
+    scan_date = scan_local.date()
+    scan_naive = scan_local.replace(tzinfo=None)
 
     # Find all subjects this ISIC is enrolled in
     enroll_stmt = select(Enrollment.subject_id).where(
@@ -452,7 +487,6 @@ async def try_auto_record(
     )
     enroll_result = await session.execute(enroll_stmt)
     subject_ids = list(enroll_result.scalars().all())
-
     if not subject_ids:
         logger.debug("No enrollments found for isic_id={}", isic_id)
         return []
@@ -470,7 +504,6 @@ async def try_auto_record(
     )
     lesson_result = await session.execute(lesson_stmt)
     lessons = list(lesson_result.scalars().all())
-
     if not lessons:
         logger.debug("No lessons found on {} for enrolled subjects", scan_date)
         return []
