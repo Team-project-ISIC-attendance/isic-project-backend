@@ -475,11 +475,19 @@ async def try_auto_record(
     Finds active lessons within the scan time window and updates
     attendance records from nepritomny/manual to pritomny/scan.
     """
-    scan_local = _coerce_utc_timestamp(scan_timestamp).astimezone(
-        ZoneInfo(settings.schedule_time_zone)
-    )
+    scan_utc = _coerce_utc_timestamp(scan_timestamp)
+    scan_local = scan_utc.astimezone(ZoneInfo(settings.schedule_time_zone))
     scan_date = scan_local.date()
     scan_naive = scan_local.replace(tzinfo=None)
+
+    logger.info(
+        "AUTO-RECORD isic_id={} | scan_utc={} | scan_local={} ({}) | scan_date={}",
+        isic_id,
+        scan_utc.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        scan_naive.strftime("%H:%M:%S"),
+        settings.schedule_time_zone,
+        scan_date,
+    )
 
     # Find all subjects this ISIC is enrolled in
     enroll_stmt = select(Enrollment.subject_id).where(
@@ -488,8 +496,15 @@ async def try_auto_record(
     enroll_result = await session.execute(enroll_stmt)
     subject_ids = list(enroll_result.scalars().all())
     if not subject_ids:
-        logger.debug("No enrollments found for isic_id={}", isic_id)
+        logger.info("AUTO-RECORD isic_id={} | no enrollments → skip", isic_id)
         return []
+
+    logger.info(
+        "AUTO-RECORD isic_id={} | enrolled in {} subject(s): {}",
+        isic_id,
+        len(subject_ids),
+        subject_ids,
+    )
 
     # Find lessons on scan_date for enrolled subjects (not cancelled)
     lesson_stmt = (
@@ -505,8 +520,20 @@ async def try_auto_record(
     lesson_result = await session.execute(lesson_stmt)
     lessons = list(lesson_result.scalars().all())
     if not lessons:
-        logger.debug("No lessons found on {} for enrolled subjects", scan_date)
+        logger.info(
+            "AUTO-RECORD isic_id={} | no lessons on {} for subjects {} → skip",
+            isic_id,
+            scan_date,
+            subject_ids,
+        )
         return []
+
+    logger.info(
+        "AUTO-RECORD isic_id={} | {} lesson(s) on {}",
+        isic_id,
+        len(lessons),
+        scan_date,
+    )
 
     updated: list[AttendanceRecord] = []
 
@@ -519,7 +546,18 @@ async def try_auto_record(
             scan_date, entry.end_time
         ) + timedelta(minutes=settings.scan_window_after_minutes)
 
-        if not (window_start <= scan_naive <= window_end):
+        in_window = window_start <= scan_naive <= window_end
+        logger.info(
+            "AUTO-RECORD isic_id={} | lesson_id={} | window [{} – {}] | scan={} | in_window={}",
+            isic_id,
+            lesson.id,
+            window_start.strftime("%H:%M"),
+            window_end.strftime("%H:%M"),
+            scan_naive.strftime("%H:%M:%S"),
+            in_window,
+        )
+
+        if not in_window:
             continue
 
         # Find the attendance record for this lesson + ISIC
@@ -531,10 +569,21 @@ async def try_auto_record(
         record = att_result.scalar_one_or_none()
 
         if record is None:
+            logger.warning(
+                "AUTO-RECORD isic_id={} | lesson_id={} | no attendance record found (not enrolled in this lesson?)",
+                isic_id,
+                lesson.id,
+            )
             continue
 
         # Idempotent: already scanned
         if record.scan_id is not None:
+            logger.info(
+                "AUTO-RECORD isic_id={} | lesson_id={} | already scanned (scan_id={}) → skip",
+                isic_id,
+                lesson.id,
+                record.scan_id,
+            )
             continue
 
         # Preserve manual overrides (status != nepritomny set by teacher)
@@ -542,14 +591,32 @@ async def try_auto_record(
             record.marked_by == MarkedBy.manual
             and record.status != AttendanceStatus.nepritomny
         ):
+            logger.info(
+                "AUTO-RECORD isic_id={} | lesson_id={} | manual override status={} → skip",
+                isic_id,
+                lesson.id,
+                record.status,
+            )
             continue
 
         record.status = AttendanceStatus.pritomny
         record.marked_by = MarkedBy.scan
         record.scan_id = scan_id
         updated.append(record)
+        logger.info(
+            "AUTO-RECORD isic_id={} | lesson_id={} | marked pritomny ✓",
+            isic_id,
+            lesson.id,
+        )
 
     if updated:
         await session.commit()
+    else:
+        logger.info(
+            "AUTO-RECORD isic_id={} | scan={} | matched {} lesson(s) but none updated",
+            isic_id,
+            scan_naive.strftime("%H:%M:%S"),
+            len(lessons),
+        )
 
     return updated

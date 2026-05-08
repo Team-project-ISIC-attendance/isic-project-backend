@@ -132,6 +132,11 @@ async def _handle_attendance_batch(
         timestamp: datetime | None = None
         if isinstance(ts_ms, (int, float)) and ts_ms > 0:
             timestamp = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
+            logger.info(
+                "SCAN ts_ms={} → utc={}", ts_ms, timestamp.strftime("%Y-%m-%d %H:%M:%S %Z")
+            )
+        else:
+            logger.info("SCAN no ts from device, will use server time")
 
         isic = await get_or_create_isic(
             session=session,

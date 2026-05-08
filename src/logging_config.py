@@ -36,6 +36,7 @@ def configure_logging() -> None:
     logger.configure(patcher=_inject_local_log_time)
     logger.add(
         sys.stderr,
+        level="DEBUG" if settings.debug else "INFO",
         format=(
             "{extra[local_time]} | {level: <8} | "
             "{name}:{function}:{line} - {message}\n{exception}"
