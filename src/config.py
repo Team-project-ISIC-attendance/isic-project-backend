@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     scan_window_before_minutes: int = 15
     scan_window_after_minutes: int = 5
-    schedule_time_zone: str = "UTC"
+    schedule_time_zone: str = "Europe/Bratislava"
     log_time_zone: str = "Europe/Bratislava"
 
 

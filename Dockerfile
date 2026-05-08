@@ -22,8 +22,8 @@ RUN mkdir -p /app/data && chmod 755 /app/data
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Install curl for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# Install curl for healthcheck and tzdata for ZoneInfo timezone support
+RUN apt-get update && apt-get install -y --no-install-recommends curl tzdata && rm -rf /var/lib/apt/lists/*
 
 # Expose port
 EXPOSE 8000
