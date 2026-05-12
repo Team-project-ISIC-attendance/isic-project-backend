@@ -34,6 +34,8 @@ def _create_mqtt_client() -> MQTTClient:
         topic=settings.mqtt_topic,
         client_id=settings.mqtt_client_id,
         session_factory=AsyncSessionLocal,
+        username=settings.mqtt_username,
+        password=settings.mqtt_password,
     )
 
 

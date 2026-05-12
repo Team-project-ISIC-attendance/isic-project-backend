@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     mqtt_broker_port: int = 1883
     mqtt_topic: str = "+/+/#"
     mqtt_client_id: str = "isic-backend"
+    mqtt_username: str | None = None
+    mqtt_password: str | None = None
     hardware_online_timeout_seconds: int = 300
 
     app_name: str = "ISIC Backend"

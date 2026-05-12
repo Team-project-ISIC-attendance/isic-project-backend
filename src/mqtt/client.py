@@ -28,12 +28,16 @@ class MQTTClient:
         topic: str,
         client_id: str,
         session_factory: async_sessionmaker[AsyncSession],
+        username: str | None = None,
+        password: str | None = None,
     ) -> None:
         self._hostname = hostname
         self._port = port
         self._topic = topic
         self._client_id = client_id
         self._session_factory = session_factory
+        self._username = username
+        self._password = password
         self._running = False
         self._connected = False
         self._task: asyncio.Task[None] | None = None
@@ -85,6 +89,8 @@ class MQTTClient:
             hostname=self._hostname,
             port=self._port,
             identifier=self._client_id,
+            username=self._username,
+            password=self._password,
         )
         try:
             async with client:
@@ -160,6 +166,8 @@ class MQTTClient:
             hostname=self._hostname,
             port=self._port,
             identifier=f"{self._client_id}-publisher",
+            username=self._username,
+            password=self._password,
         )
         async with client:
             await client.publish(topic, payload=mqtt_payload, retain=retain)
