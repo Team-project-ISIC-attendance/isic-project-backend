@@ -1,0 +1,5 @@
+* text=auto
+
+# Keep container build assets LF on every platform.
+Dockerfile text eol=lf
+*.sh text eol=lf
