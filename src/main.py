@@ -11,6 +11,7 @@ from src.api.auth import router as auth_router
 from src.api.export import router as export_router
 from src.api.hardware import router as hardware_router
 from src.api.lessons import router as lessons_router
+from src.api.ota import router as ota_router
 from src.api.routes import router
 from src.api.schedule import router as schedule_router
 from src.api.semesters import router as semesters_router
@@ -85,6 +86,7 @@ app.include_router(auth_router)
 app.include_router(export_router)
 app.include_router(hardware_router)
 app.include_router(lessons_router)
+app.include_router(ota_router)
 app.include_router(router)
 app.include_router(semesters_router)
 app.include_router(students_router)

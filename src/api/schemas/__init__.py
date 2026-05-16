@@ -34,6 +34,7 @@ from src.api.schemas.hardware import (
     HardwareSnapshotResponse,
     PairingSessionResponse,
 )
+from src.api.schemas.ota import OtaDeployResponse, OtaFirmwareResponse
 from src.api.schemas.lesson import (
     LessonResponse,
     LessonUpdateRequest,
@@ -96,6 +97,8 @@ __all__ = [
     "SubjectResponse",
     "SubjectUpdate",
     "TokenResponse",
+    "OtaDeployResponse",
+    "OtaFirmwareResponse",
     "PairingSessionResponse",
     "UserISICUpdateRequest",
     "UserResponse",

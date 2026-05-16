@@ -36,5 +36,11 @@ class Settings(BaseSettings):
     schedule_time_zone: str = "Europe/Bratislava"
     log_time_zone: str = "Europe/Bratislava"
 
+    firmware_storage_path: str = "data/firmware"
+    # LAN IP/hostname devices use to reach this backend directly (no nginx prefix).
+    # Set SERVER_HOST=192.168.x.x in .env so devices can download firmware.
+    server_host: str = ""
+
+
 
 settings = Settings()

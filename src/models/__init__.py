@@ -8,6 +8,7 @@ from src.models.enrollment import Enrollment
 from src.models.hardware_device import HardwareDevice
 from src.models.isic import ISIC
 from src.models.lesson import Lesson
+from src.models.ota_firmware import OtaFirmware
 from src.models.scan import ISICScan
 from src.models.schedule_entry import LessonType, ScheduleEntry
 from src.models.semester import Semester
@@ -28,6 +29,7 @@ __all__ = [
     "Lesson",
     "LessonType",
     "MarkedBy",
+    "OtaFirmware",
     "ScheduleEntry",
     "Semester",
     "Subject",

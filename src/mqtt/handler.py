@@ -19,6 +19,17 @@ from src.services.hardware_service import (
 from src.services.attendance_service import try_auto_record
 from src.services.scan_service import create_scan, get_or_create_isic
 
+# In-memory OTA state per device — cleared when a new deploy is triggered
+_ota_states: dict[str, dict[str, Any]] = {}
+
+
+def get_ota_state(device_id: str) -> dict[str, Any] | None:
+    return _ota_states.get(device_id)
+
+
+def clear_ota_state(device_id: str) -> None:
+    _ota_states.pop(device_id, None)
+
 
 async def handle_mqtt_message(
     session: AsyncSession,
@@ -59,6 +70,10 @@ async def handle_mqtt_message(
         elif parsed_topic.kind == "config":
             _handle_config(device, parsed_topic.section, message_str)
             await session.commit()
+        elif parsed_topic.kind in ("ota/completed", "ota/error"):
+            _handle_ota_event(device, parsed_topic.kind, message_str)
+        elif parsed_topic.kind == "ota/progress":
+            _handle_ota_progress(device, message_str)
         else:
             logger.warning(
                 "Unknown topic suffix '{}' from device {}",
@@ -231,3 +246,35 @@ def _handle_config(
         section or "full",
         device.config_payload,
     )
+
+
+def _handle_ota_progress(
+    device: "HardwareDevice",  # type: ignore[name-defined]  # noqa: F821
+    message_str: str,
+) -> None:
+    try:
+        progress = int(message_str.strip())
+        progress = max(0, min(100, progress))
+    except ValueError:
+        return
+    _ota_states[device.device_id] = {
+        "state": "progress",
+        "progress": progress,
+        "payload": message_str,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+def _handle_ota_event(
+    device: "HardwareDevice",  # type: ignore[name-defined]  # noqa: F821
+    kind: str,
+    message_str: str,
+) -> None:
+    state = "completed" if kind == "ota/completed" else "error"
+    _ota_states[device.device_id] = {
+        "state": state,
+        "progress": 100 if state == "completed" else None,
+        "payload": message_str,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    logger.info("OTA {} for device {}: {}", state, device.device_id, message_str)

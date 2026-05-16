@@ -53,6 +53,13 @@ def parse_hardware_topic(topic: str) -> ParsedHardwareTopic | None:
     if len(parts) < 3:
         return None
 
+    # config/set/* and config/get/* are backend→device control topics; ignore echoes
+    if len(parts) >= 4 and parts[-2] in {"set", "get"}:
+        return None
+    # ota/start is backend→device; ota/completed and ota/error are device→backend
+    if len(parts) >= 4 and parts[-2] == "ota" and parts[-1] == "start":
+        return None
+
     if parts[-1] in {"attendance", "health", "metrics", "config", "status"}:
         device_index = -2
         kind = parts[-1]
